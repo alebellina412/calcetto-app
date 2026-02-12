@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Form, HTTPException, Request
@@ -24,7 +25,9 @@ from .stats import build_dashboard, compute_player_stats, match_to_view, player_
 app = FastAPI(title="Calcetto App")
 app.add_middleware(SessionMiddleware, secret_key="dev-secret-calcetto")
 
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
 
