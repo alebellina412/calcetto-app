@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Home - Calcetto{% endblock %}
+{% block content %}
+<h1 class="text-xl font-bold mb-4">Dashboard</h1>
+<div class="grid gap-4 md:grid-cols-2">
+  <section class="bg-white rounded-xl p-4 shadow">
+    <h2 class="font-semibold mb-2">Top Scorers</h2>
+    <ul class="space-y-1 text-sm">
+      {% for s in dashboard.top_scorers %}
+      <li class="flex justify-between"><span>{{ s.name }}</span><strong>{{ s.goals_scored }}</strong></li>
+      {% else %}
+      <li>No data.</li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="bg-white rounded-xl p-4 shadow">
+    <h2 class="font-semibold mb-2">Win Rate Ranking</h2>
+    <ul class="space-y-1 text-sm">
+      {% for s in dashboard.win_rate_ranking %}
+      <li class="flex justify-between"><span>{{ s.name }}</span><strong>{{ "%.1f"|format(s.win_rate * 100) }}%</strong></li>
+      {% else %}
+      <li>No data.</li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="bg-white rounded-xl p-4 shadow">
+    <h2 class="font-semibold mb-2">ELO Placeholder</h2>
+    <ul class="space-y-1 text-sm">
+      {% for s in dashboard.elo_ranking %}
+      <li class="flex justify-between"><span>{{ s.name }}</span><strong>{{ "%.1f"|format(s.elo_placeholder) }}</strong></li>
+      {% else %}
+      <li>No data.</li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="bg-white rounded-xl p-4 shadow">
+    <h2 class="font-semibold mb-2">Latest Matches</h2>
+    <ul class="space-y-2 text-sm">
+      {% for m in dashboard.latest_matches %}
+      <li class="border rounded p-2">
+        <a class="font-medium underline" href="/matches/{{ m.match_id }}">{{ m.date }}</a>
+        <div>{{ m.goals_a }} - {{ m.goals_b }} ({{ m.winner }})</div>
+      </li>
+      {% else %}
+      <li>No matches.</li>
+      {% endfor %}
+    </ul>
+  </section>
+</div>
+{% endblock %}

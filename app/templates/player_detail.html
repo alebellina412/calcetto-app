@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ player.name }} - Calcetto{% endblock %}
+{% block content %}
+<h1 class="text-xl font-bold mb-3">{{ player.name }}</h1>
+<div class="grid grid-cols-2 gap-2 mb-4 text-sm">
+  <div class="bg-white rounded p-3 shadow">Matches: <strong>{{ stats.matches }}</strong></div>
+  <div class="bg-white rounded p-3 shadow">Wins: <strong>{{ stats.wins }}</strong></div>
+  <div class="bg-white rounded p-3 shadow">Draws: <strong>{{ stats.draws }}</strong></div>
+  <div class="bg-white rounded p-3 shadow">Losses: <strong>{{ stats.losses }}</strong></div>
+  <div class="bg-white rounded p-3 shadow">Goals Scored: <strong>{{ stats.goals_scored }}</strong></div>
+  <div class="bg-white rounded p-3 shadow">Goals Conceded: <strong>{{ stats.goals_conceded }}</strong></div>
+  <div class="bg-white rounded p-3 shadow">Win Rate: <strong>{{ "%.1f"|format(stats.win_rate * 100) }}%</strong></div>
+  <div class="bg-white rounded p-3 shadow">ELO Placeholder: <strong>{{ "%.1f"|format(stats.elo_placeholder) }}</strong></div>
+</div>
+
+<div class="bg-white rounded-xl p-4 shadow">
+  <h2 class="font-semibold mb-2">ELO Placeholder Over Time</h2>
+  <canvas id="eloChart"></canvas>
+</div>
+<script>
+const labels = {{ timeline_labels | safe }};
+const values = {{ timeline_values | safe }};
+const ctx = document.getElementById('eloChart');
+new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels,
+    datasets: [{
+      label: 'ELO Placeholder',
+      data: values,
+      borderColor: '#059669',
+      backgroundColor: 'rgba(5, 150, 105, 0.15)',
+      tension: 0.25,
+      fill: true,
+    }]
+  },
+  options: {
+    scales: { y: { beginAtZero: true } },
+    plugins: { legend: { display: true } }
+  }
+});
+</script>
+{% endblock %}

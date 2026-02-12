@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Debug - Calcetto{% endblock %}
+{% block content %}
+<h1 class="text-xl font-bold mb-3">Invalid Match Files</h1>
+<ul class="space-y-2">
+  {% for f in invalid_files %}
+  <li class="bg-white rounded-xl p-3 shadow text-sm">
+    <div class="font-semibold">{{ f.file_name }}</div>
+    <div class="text-red-700">{{ f.error }}</div>
+  </li>
+  {% else %}
+  <li class="bg-white rounded-xl p-3 shadow">No invalid files found.</li>
+  {% endfor %}
+</ul>
+{% endblock %}

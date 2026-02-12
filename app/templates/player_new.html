@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}New Player - Calcetto{% endblock %}
+{% block content %}
+<div class="max-w-md bg-white rounded-xl p-5 shadow">
+  <h1 class="text-xl font-semibold mb-4">Add Player</h1>
+  {% if error %}
+    <div class="mb-3 rounded border border-red-300 bg-red-100 text-red-800 p-2 text-sm">{{ error }}</div>
+  {% endif %}
+  <form method="post" action="/players/new" class="space-y-3">
+    <input type="text" name="name" value="{{ name }}" class="w-full border rounded p-2" placeholder="Player name" required />
+    <button class="bg-emerald-700 text-white rounded p-2 w-full">Save</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Calcetto{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-slate-100 text-slate-900 min-h-screen">
+  <header class="bg-emerald-700 text-white shadow">
+    <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+      <a href="/" class="font-bold text-lg">Calcetto 5v5</a>
+      {% if current_user %}
+      <div class="text-sm flex items-center gap-2">
+        <span>{{ current_user }}</span>
+        <form action="/logout" method="post">
+          <button type="submit" class="bg-emerald-900 px-2 py-1 rounded">Logout</button>
+        </form>
+      </div>
+      {% endif %}
+    </div>
+    {% if current_user %}
+    <nav class="max-w-5xl mx-auto px-4 pb-3 text-sm flex gap-3 overflow-x-auto">
+      <a href="/" class="underline-offset-2 hover:underline">Home</a>
+      <a href="/players" class="underline-offset-2 hover:underline">Players</a>
+      <a href="/players/new" class="underline-offset-2 hover:underline">Add Player</a>
+      <a href="/matches" class="underline-offset-2 hover:underline">Matches</a>
+      <a href="/matches/new" class="underline-offset-2 hover:underline">Add Match</a>
+      <a href="/debug" class="underline-offset-2 hover:underline">Debug</a>
+    </nav>
+    {% endif %}
+  </header>
+
+  <main class="max-w-5xl mx-auto px-4 py-4">
+    {% if invalid_count and invalid_count > 0 %}
+      <div class="mb-4 rounded border border-amber-300 bg-amber-100 text-amber-900 p-3 text-sm">
+        {{ invalid_count }} invalid match file(s) ignored. <a href="/debug" class="underline">Details</a>
+      </div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

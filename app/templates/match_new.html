@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}New Match - Calcetto{% endblock %}
+{% block content %}
+<h1 class="text-xl font-bold mb-3">Add Match</h1>
+{% if error %}
+  <div class="mb-3 rounded border border-red-300 bg-red-100 text-red-800 p-2 text-sm">{{ error }}</div>
+{% endif %}
+<form method="post" action="/matches/new" class="space-y-4">
+  <div class="bg-white rounded-xl p-3 shadow space-y-2">
+    <label class="block text-sm">Date
+      <input type="date" name="date" value="{{ form_data.get('date', '') }}" class="w-full border rounded p-2" required />
+    </label>
+    <label class="block text-sm">Note
+      <input type="text" name="note" value="{{ form_data.get('note', '') }}" class="w-full border rounded p-2" placeholder="Optional note" />
+    </label>
+  </div>
+
+  <div class="grid gap-3 md:grid-cols-2">
+    {% for team in ['A', 'B'] %}
+    <section class="bg-white rounded-xl p-3 shadow">
+      <h2 class="font-semibold mb-2">Team {{ team }}</h2>
+      <div class="space-y-2">
+        {% for i in range(1, 6) %}
+        <div class="grid grid-cols-3 gap-2">
+          <select name="team_{{ team }}_{{ i }}" class="col-span-2 border rounded p-2" required>
+            <option value="">Select player</option>
+            {% for p in players %}
+            {% set key = 'team_' ~ team ~ '_' ~ i %}
+            <option value="{{ p.name }}" {% if form_data.get(key) == p.name %}selected{% endif %}>{{ p.name }}</option>
+            {% endfor %}
+          </select>
+          {% set goals_key = 'goals_' ~ team ~ '_' ~ i %}
+          <input type="number" name="goals_{{ team }}_{{ i }}" min="0" value="{{ form_data.get(goals_key, '0') }}" class="border rounded p-2" required />
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+    {% endfor %}
+  </div>
+
+  <button class="w-full bg-emerald-700 text-white rounded p-3">Create Match</button>
+</form>
+{% endblock %}

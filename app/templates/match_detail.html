@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Match {{ match.match_id }} - Calcetto{% endblock %}
+{% block content %}
+<div class="bg-white rounded-xl p-4 shadow mb-3">
+  <h1 class="text-lg font-bold">Match {{ match.date.strftime('%Y-%m-%d') }}</h1>
+  <p class="text-sm text-slate-600">{{ match.note or 'No note' }}</p>
+  <p class="mt-2">Final score: <strong>{{ match.goals_a }} - {{ match.goals_b }}</strong></p>
+  <p>Winner: <strong>{{ match.winner }}</strong></p>
+</div>
+
+<div class="grid gap-3 md:grid-cols-2 mb-4">
+  <section class="bg-white rounded-xl p-4 shadow">
+    <h2 class="font-semibold mb-2">Team A</h2>
+    <ul class="space-y-1 text-sm">
+      {% for p in match.team_a %}
+      <li class="flex justify-between"><span>{{ p.player }}</span><strong>{{ p.goals }}</strong></li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="bg-white rounded-xl p-4 shadow">
+    <h2 class="font-semibold mb-2">Team B</h2>
+    <ul class="space-y-1 text-sm">
+      {% for p in match.team_b %}
+      <li class="flex justify-between"><span>{{ p.player }}</span><strong>{{ p.goals }}</strong></li>
+      {% endfor %}
+    </ul>
+  </section>
+</div>
+
+<form method="post" action="/matches/{{ match.match_id }}/delete" onsubmit="return confirm('Soft delete this match from UI?')">
+  <button class="bg-red-700 text-white px-4 py-2 rounded">Soft Delete</button>
+</form>
+{% endblock %}

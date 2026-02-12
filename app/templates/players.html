@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Players - Calcetto{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-3">
+  <h1 class="text-xl font-bold">Players</h1>
+  <a href="/players/new" class="bg-emerald-700 text-white rounded px-3 py-2 text-sm">Add</a>
+</div>
+<input id="playerSearch" type="text" placeholder="Search players..." class="w-full border rounded p-2 mb-3" />
+<ul id="playersList" class="space-y-2">
+  {% for p in players %}
+  <li class="bg-white rounded p-3 shadow player-row" data-name="{{ p.name|lower }}">
+    <a href="/players/{{ p.id }}" class="font-medium underline">{{ p.name }}</a>
+  </li>
+  {% endfor %}
+</ul>
+<script>
+const search = document.getElementById('playerSearch');
+const rows = document.querySelectorAll('.player-row');
+search.addEventListener('input', () => {
+  const q = search.value.toLowerCase().trim();
+  rows.forEach(r => { r.style.display = r.dataset.name.includes(q) ? '' : 'none'; });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Matches - Calcetto{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-3">
+  <h1 class="text-xl font-bold">Matches</h1>
+  <a href="/matches/new" class="bg-emerald-700 text-white rounded px-3 py-2 text-sm">Add</a>
+</div>
+<ul class="space-y-3">
+  {% for m in matches %}
+  <li class="bg-white rounded-xl p-3 shadow">
+    <a href="/matches/{{ m.match_id }}" class="font-semibold underline">{{ m.date }}</a>
+    <div class="text-sm mt-1">Score: {{ m.goals_a }} - {{ m.goals_b }} ({{ m.winner }})</div>
+    <div class="text-xs text-slate-600 mt-1">A: {{ m.team_a_players|join(', ') }}</div>
+    <div class="text-xs text-slate-600">B: {{ m.team_b_players|join(', ') }}</div>
+  </li>
+  {% else %}
+  <li class="bg-white rounded-xl p-3 shadow">No matches available.</li>
+  {% endfor %}
+</ul>
+{% endblock %}
