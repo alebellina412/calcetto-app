@@ -17,13 +17,15 @@ from .data_io import (
     add_player,
     initialize_data_dirs,
     load_bundle,
+    load_players,
     soft_delete_match,
     write_match_excel,
 )
 from .stats import build_dashboard, compute_player_stats, match_to_view, player_cumulative_series, player_matches_views
 
 app = FastAPI(title="Calcetto App")
-app.add_middleware(SessionMiddleware, secret_key="dev-secret-calcetto")
+# Session cookie lasts only for the browser session (no multi-day persistence).
+app.add_middleware(SessionMiddleware, secret_key="dev-secret-calcetto", max_age=None)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
@@ -44,9 +46,16 @@ def current_user(request: Request) -> str | None:
 
 
 def require_user(request: Request) -> RedirectResponse | None:
-    if current_user(request):
-        return None
-    return RedirectResponse(url="/login", status_code=303)
+    user = current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    valid_names = {p.name for p in load_players()}
+    if user not in valid_names:
+        request.session.clear()
+        return RedirectResponse(url="/login", status_code=303)
+
+    return None
 
 
 def render_page(request: Request, template: str, bundle: DataBundle, extra: dict[str, Any] | None = None) -> HTMLResponse:
