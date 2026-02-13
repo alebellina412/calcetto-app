@@ -15,6 +15,17 @@
   </section>
 
   <section class="bg-white rounded-xl p-4 shadow">
+    <h2 class="font-semibold mb-2">Top Assists</h2>
+    <ul class="space-y-1 text-sm">
+      {% for s in dashboard.top_assists %}
+      <li class="flex justify-between"><span>{{ s.name }}</span><strong>{{ s.assists }}</strong></li>
+      {% else %}
+      <li>No data.</li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="bg-white rounded-xl p-4 shadow">
     <h2 class="font-semibold mb-2">Win Rate Ranking</h2>
     <ul class="space-y-1 text-sm">
       {% for s in dashboard.win_rate_ranking %}

@@ -6,4 +6,12 @@ __pycache__/
 
 # Local runtime data
 /app/*.db
-/data/matches/*.xlsx
+/CALCETTO_2.0.xlsm
+/analysis/
+
+# Keep data/ folder in repo, but not its runtime contents
+/data/*
+!/data/.gitkeep
+!/data/matches/
+/data/matches/*
+!/data/matches/.gitkeep

@@ -21,7 +21,7 @@
       <h2 class="font-semibold mb-2">Team {{ team }}</h2>
       <div class="space-y-2">
         {% for i in range(1, 6) %}
-        <div class="grid grid-cols-3 gap-2">
+        <div class="grid grid-cols-4 gap-2">
           <select name="team_{{ team }}_{{ i }}" class="col-span-2 border rounded p-2" required>
             <option value="">Select player</option>
             {% for p in players %}
@@ -30,7 +30,9 @@
             {% endfor %}
           </select>
           {% set goals_key = 'goals_' ~ team ~ '_' ~ i %}
-          <input type="number" name="goals_{{ team }}_{{ i }}" min="0" value="{{ form_data.get(goals_key, '0') }}" class="border rounded p-2" required />
+          <input type="number" name="goals_{{ team }}_{{ i }}" min="0" value="{{ form_data.get(goals_key, '0') }}" class="border rounded p-2" placeholder="G" title="Goals" required />
+          {% set assists_key = 'assists_' ~ team ~ '_' ~ i %}
+          <input type="number" name="assists_{{ team }}_{{ i }}" min="0" value="{{ form_data.get(assists_key, '0') }}" class="border rounded p-2" placeholder="A" title="Assists" required />
         </div>
         {% endfor %}
       </div>
@@ -38,6 +40,6 @@
     {% endfor %}
   </div>
 
-  <button class="w-full bg-emerald-700 text-white rounded p-3">Create Match</button>
+  <button class="w-full bg-blue-600 text-white rounded p-3">Create Match</button>
 </form>
 {% endblock %}

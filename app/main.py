@@ -15,12 +15,12 @@ from .data_io import (
     DataBundle,
     MatchPlayerRow,
     add_player,
-    bootstrap_mock_data_if_needed,
+    initialize_data_dirs,
     load_bundle,
     soft_delete_match,
     write_match_excel,
 )
-from .stats import build_dashboard, compute_player_stats, match_to_view, player_elo_timeline
+from .stats import build_dashboard, compute_player_stats, match_to_view, player_cumulative_series, player_matches_views
 
 app = FastAPI(title="Calcetto App")
 app.add_middleware(SessionMiddleware, secret_key="dev-secret-calcetto")
@@ -33,7 +33,7 @@ templates = Jinja2Templates(directory="app/templates")
 
 @app.on_event("startup")
 def on_startup() -> None:
-    bootstrap_mock_data_if_needed()
+    initialize_data_dirs()
 
 
 def current_user(request: Request) -> str | None:
@@ -69,6 +69,39 @@ def index(request: Request) -> HTMLResponse:
     bundle = load_bundle()
     dashboard = build_dashboard(matches=bundle.matches, player_names=[p.name for p in bundle.players])
     return render_page(request, "index.html", bundle, {"dashboard": dashboard})
+
+
+@app.get("/profile", response_class=HTMLResponse)
+def profile_page(request: Request) -> HTMLResponse:
+    redirect = require_user(request)
+    if redirect:
+        return redirect
+
+    bundle = load_bundle()
+    user_name = current_user(request)
+    if not user_name:
+        return RedirectResponse(url="/login", status_code=303)
+    player = next((p for p in bundle.players if p.name == user_name), None)
+    if not player:
+        raise HTTPException(status_code=404, detail="Logged user not found in players")
+
+    stats_map = compute_player_stats(bundle.matches, [p.name for p in bundle.players])
+    pstats = stats_map[player.name]
+    timeline_labels, timeline_series = player_cumulative_series(bundle.matches, player.name)
+    player_matches = player_matches_views(bundle.matches, player.name)
+
+    return render_page(
+        request,
+        "profile.html",
+        bundle,
+        {
+            "player": player,
+            "stats": pstats,
+            "timeline_labels": json.dumps(timeline_labels),
+            "timeline_series": json.dumps(timeline_series),
+            "player_matches": player_matches,
+        },
+    )
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -152,7 +185,8 @@ def player_detail(request: Request, player_id: int) -> HTMLResponse:
 
     stats_map = compute_player_stats(bundle.matches, [p.name for p in bundle.players])
     pstats = stats_map[player.name]
-    timeline = player_elo_timeline(bundle.matches, player.name)
+    timeline_labels, timeline_series = player_cumulative_series(bundle.matches, player.name)
+    player_matches = player_matches_views(bundle.matches, player.name)
 
     return render_page(
         request,
@@ -161,8 +195,9 @@ def player_detail(request: Request, player_id: int) -> HTMLResponse:
         {
             "player": player,
             "stats": pstats,
-            "timeline_labels": json.dumps([t.date for t in timeline]),
-            "timeline_values": json.dumps([round(t.elo, 2) for t in timeline]),
+            "timeline_labels": json.dumps(timeline_labels),
+            "timeline_series": json.dumps(timeline_series),
+            "player_matches": player_matches,
         },
     )
 
@@ -229,8 +264,10 @@ def _extract_match_form(form: Any, valid_names: set[str]) -> tuple[date, str, li
         for idx in range(1, 6):
             player_key = f"team_{team}_{idx}"
             goals_key = f"goals_{team}_{idx}"
+            assists_key = f"assists_{team}_{idx}"
             player = str(form.get(player_key, "")).strip()
             goals_raw = str(form.get(goals_key, "")).strip()
+            assists_raw = str(form.get(assists_key, "")).strip()
 
             if not player:
                 raise ValueError("All 10 player slots must be selected")
@@ -245,8 +282,16 @@ def _extract_match_form(form: Any, valid_names: set[str]) -> tuple[date, str, li
                 raise ValueError("Goals must be integers") from exc
             if goals < 0:
                 raise ValueError("Goals must be >= 0")
+            if not assists_raw:
+                raise ValueError("Assists are required for each selected player")
+            try:
+                assists = int(assists_raw)
+            except ValueError as exc:
+                raise ValueError("Assists must be integers") from exc
+            if assists < 0:
+                raise ValueError("Assists must be >= 0")
 
-            rows.append(MatchPlayerRow(team=team, player=player, goals=goals))
+            rows.append(MatchPlayerRow(team=team, player=player, goals=goals, assists=assists))
             selected.append(player)
 
     if len(set(selected)) != 10:

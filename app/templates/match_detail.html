@@ -13,7 +13,10 @@
     <h2 class="font-semibold mb-2">Team A</h2>
     <ul class="space-y-1 text-sm">
       {% for p in match.team_a %}
-      <li class="flex justify-between"><span>{{ p.player }}</span><strong>{{ p.goals }}</strong></li>
+      <li class="flex justify-between">
+        <span>{{ p.player }}</span>
+        <strong>G: {{ p.goals }} | A: {{ p.assists }}</strong>
+      </li>
       {% endfor %}
     </ul>
   </section>
@@ -22,7 +25,10 @@
     <h2 class="font-semibold mb-2">Team B</h2>
     <ul class="space-y-1 text-sm">
       {% for p in match.team_b %}
-      <li class="flex justify-between"><span>{{ p.player }}</span><strong>{{ p.goals }}</strong></li>
+      <li class="flex justify-between">
+        <span>{{ p.player }}</span>
+        <strong>G: {{ p.goals }} | A: {{ p.assists }}</strong>
+      </li>
       {% endfor %}
     </ul>
   </section>

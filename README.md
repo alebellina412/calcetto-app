@@ -11,6 +11,7 @@ Simple mobile-friendly FastAPI app for a friends 5v5 soccer group.
 - Auto-load manually dropped Excel files in `data/matches/`.
 - Soft delete from UI using `data/deleted_matches.json` (Excel files are never removed).
 - Debug page for invalid files ignored during parsing.
+- Data source fallback: use `data/` (real data) and fall back to `data_mock/` when `data/` is empty.
 
 ## Tech Stack
 - Backend: FastAPI
@@ -44,6 +45,12 @@ calcetto-app/
     players.csv
     matches/
     deleted_matches.json
+  data_mock/
+    players.csv
+    matches/
+    deleted_matches.json
+  scripts/
+    import_real_data_from_xlsm.py
   requirements.txt
   README.md
 ```
@@ -60,10 +67,18 @@ calcetto-app/
    ```
 4. Open `http://127.0.0.1:8000`.
 
-## First Run Mock Data
-On startup, if `data/players.csv` is missing/empty or `data/matches/` has no Excel files:
-- 20 players are generated.
-- 15 valid mock matches are generated with random dates in the last 90 days.
+## Real vs Mock Data
+- Real data lives in `data/`.
+- Mock data lives in `data_mock/`.
+- Runtime behavior:
+  - if `data/` has both players and match files, the app reads `data/`;
+  - otherwise the app automatically reads `data_mock/`.
+
+To import real data from `CALCETTO_2.0.xlsm` into `data/`:
+
+```bash
+python3 scripts/import_real_data_from_xlsm.py
+```
 
 ## Excel Match Format (Required)
 Each match file must contain exactly two sheets:
@@ -72,12 +87,14 @@ Each match file must contain exactly two sheets:
    - 2 columns (`key`, `value`) with at least:
      - `date`: `YYYY-MM-DD`
      - `note`: optional
+     - `goals_a`: optional integer override for team A score
+     - `goals_b`: optional integer override for team B score
 
 2. `players`
-   - Columns exactly: `team,player,goals`
-   - Exactly 10 rows total: 5 team `A`, 5 team `B`
-   - Players must be unique across all 10 rows
-   - `goals` must be integer >= 0
+   - Columns: `team,player,goals,assists` (legacy files without `assists` are still accepted and treated as `0`)
+   - At least one player for each team (`A` and `B`) for imported files
+   - Players must be unique in the same match
+   - `goals` and `assists` must be integer >= 0
 
 Example:
 
@@ -106,5 +123,5 @@ Invalid files are skipped and shown on `/debug`.
 - Match creation always requires exactly 5 players in team A and 5 in team B.
 - Duplicate player selection in one match is rejected.
 - Selected players must exist in `players.csv`.
-- Result/winner is always computed automatically from summed goals.
+- Result/winner uses `goals_a/goals_b` in `meta` when present, otherwise summed player goals.
 - Player names are unique case-insensitively when adding players.

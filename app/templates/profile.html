@@ -1,7 +1,13 @@
 {% extends "base.html" %}
-{% block title %}{{ player.name }} - Calcetto{% endblock %}
+{% block title %}Profile - Calcetto{% endblock %}
 {% block content %}
-<h1 class="text-xl font-bold mb-3">{{ player.name }}</h1>
+<div class="flex items-center justify-between mb-3">
+  <h1 class="text-xl font-bold">My Profile</h1>
+  <a href="/players/{{ player.id }}" class="text-sm underline">Open full player page</a>
+</div>
+
+<div class="mb-3 text-sm text-slate-600">Logged as <strong>{{ player.name }}</strong></div>
+
 <div class="grid grid-cols-2 gap-2 mb-4 text-sm">
   <button type="button" data-target="player-matches" class="stat-open-matches bg-white rounded p-3 shadow text-left hover:bg-slate-50">
     Matches: <strong>{{ stats.matches }}</strong>
@@ -18,7 +24,7 @@
 
 <div class="bg-white rounded-xl p-4 shadow">
   <h2 id="metricTitle" class="font-semibold mb-2">ELO Placeholder Over Time</h2>
-  <canvas id="eloChart"></canvas>
+  <canvas id="profileEloChart"></canvas>
 </div>
 
 <section id="player-matches" class="bg-white rounded-xl p-4 shadow mt-4 hidden">
@@ -39,7 +45,7 @@
 <script>
 const labels = {{ timeline_labels | safe }};
 const series = {{ timeline_series | safe }};
-const ctx = document.getElementById('eloChart');
+const ctx = document.getElementById('profileEloChart');
 const title = document.getElementById('metricTitle');
 const metricCards = Array.from(document.querySelectorAll('.metric-card'));
 const matchesBtn = document.querySelector('.stat-open-matches');

@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 import json
 import os
-import random
 from pathlib import Path
 from typing import Iterable
 
@@ -22,6 +21,7 @@ class MatchPlayerRow:
     team: str
     player: str
     goals: int
+    assists: int = 0
 
 
 @dataclass
@@ -31,6 +31,8 @@ class Match:
     date: date
     note: str
     players: list[MatchPlayerRow]
+    goals_a_override: int | None = None
+    goals_b_override: int | None = None
 
     @property
     def team_a(self) -> list[MatchPlayerRow]:
@@ -42,10 +44,14 @@ class Match:
 
     @property
     def goals_a(self) -> int:
+        if self.goals_a_override is not None:
+            return self.goals_a_override
         return sum(p.goals for p in self.team_a)
 
     @property
     def goals_b(self) -> int:
+        if self.goals_b_override is not None:
+            return self.goals_b_override
         return sum(p.goals for p in self.team_b)
 
     @property
@@ -72,21 +78,58 @@ class DataBundle:
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = Path(os.getenv("CALCETTO_DATA_DIR", str(BASE_DIR / "data"))).resolve()
-PLAYERS_FILE = DATA_DIR / "players.csv"
-MATCHES_DIR = DATA_DIR / "matches"
-DELETED_FILE = DATA_DIR / "deleted_matches.json"
+REAL_DATA_DIR = Path(os.getenv("CALCETTO_DATA_DIR", str(BASE_DIR / "data"))).resolve()
+MOCK_DATA_DIR = Path(os.getenv("CALCETTO_MOCK_DATA_DIR", str(BASE_DIR / "data_mock"))).resolve()
 
 
-def ensure_data_layout() -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    MATCHES_DIR.mkdir(parents=True, exist_ok=True)
+@dataclass(frozen=True)
+class DataPaths:
+    data_dir: Path
+    players_file: Path
+    matches_dir: Path
+    deleted_file: Path
 
-    if not PLAYERS_FILE.exists():
-        pd.DataFrame(columns=["id", "name"]).to_csv(PLAYERS_FILE, index=False)
 
-    if not DELETED_FILE.exists():
-        DELETED_FILE.write_text("[]", encoding="utf-8")
+def _build_paths(data_dir: Path) -> DataPaths:
+    return DataPaths(
+        data_dir=data_dir,
+        players_file=data_dir / "players.csv",
+        matches_dir=data_dir / "matches",
+        deleted_file=data_dir / "deleted_matches.json",
+    )
+
+
+def ensure_data_layout(paths: DataPaths) -> None:
+    paths.data_dir.mkdir(parents=True, exist_ok=True)
+    paths.matches_dir.mkdir(parents=True, exist_ok=True)
+
+    if not paths.players_file.exists():
+        pd.DataFrame(columns=["id", "name"]).to_csv(paths.players_file, index=False)
+
+    if not paths.deleted_file.exists():
+        paths.deleted_file.write_text("[]", encoding="utf-8")
+
+
+def _has_usable_data(paths: DataPaths) -> bool:
+    if not paths.players_file.exists() or not paths.matches_dir.exists():
+        return False
+    try:
+        players_df = pd.read_csv(paths.players_file)
+    except Exception:
+        return False
+    has_players = not players_df.empty
+    has_matches = any(paths.matches_dir.glob("*.xlsx"))
+    return has_players and has_matches
+
+
+def _resolve_active_paths() -> DataPaths:
+    real_paths = _build_paths(REAL_DATA_DIR)
+    mock_paths = _build_paths(MOCK_DATA_DIR)
+    ensure_data_layout(real_paths)
+    ensure_data_layout(mock_paths)
+    if _has_usable_data(real_paths):
+        return real_paths
+    return mock_paths
 
 
 def _normalize_name(name: str) -> str:
@@ -94,8 +137,8 @@ def _normalize_name(name: str) -> str:
 
 
 def load_players() -> list[Player]:
-    ensure_data_layout()
-    df = pd.read_csv(PLAYERS_FILE)
+    paths = _resolve_active_paths()
+    df = pd.read_csv(paths.players_file)
     if df.empty:
         return []
     expected_cols = ["id", "name"]
@@ -108,9 +151,9 @@ def load_players() -> list[Player]:
 
 
 def save_players(players: Iterable[Player]) -> None:
-    ensure_data_layout()
+    paths = _resolve_active_paths()
     df = pd.DataFrame([{"id": p.id, "name": p.name} for p in players])
-    df.to_csv(PLAYERS_FILE, index=False)
+    df.to_csv(paths.players_file, index=False)
 
 
 def add_player(name: str) -> Player:
@@ -131,9 +174,9 @@ def add_player(name: str) -> Player:
 
 
 def load_deleted_matches() -> set[str]:
-    ensure_data_layout()
+    paths = _resolve_active_paths()
     try:
-        raw = json.loads(DELETED_FILE.read_text(encoding="utf-8"))
+        raw = json.loads(paths.deleted_file.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ValueError("deleted_matches.json is invalid JSON") from exc
 
@@ -144,8 +187,8 @@ def load_deleted_matches() -> set[str]:
 
 
 def save_deleted_matches(match_ids: set[str]) -> None:
-    ensure_data_layout()
-    DELETED_FILE.write_text(json.dumps(sorted(match_ids), indent=2), encoding="utf-8")
+    paths = _resolve_active_paths()
+    paths.deleted_file.write_text(json.dumps(sorted(match_ids), indent=2), encoding="utf-8")
 
 
 def soft_delete_match(match_id: str) -> None:
@@ -179,14 +222,22 @@ def _parse_match_excel(path: Path, valid_player_names: set[str]) -> Match:
         raise ValueError("meta date must be in format YYYY-MM-DD") from exc
 
     note = meta_map.get("note", "")
+    goals_a_override: int | None = None
+    goals_b_override: int | None = None
+    if "goals_a" in meta_map and "goals_b" in meta_map:
+        try:
+            goals_a_override = int(meta_map["goals_a"])
+            goals_b_override = int(meta_map["goals_b"])
+        except ValueError as exc:
+            raise ValueError("meta goals_a/goals_b must be integers") from exc
 
     players_df = pd.read_excel(path, sheet_name="players")
-    expected_cols = ["team", "player", "goals"]
-    if list(players_df.columns) != expected_cols:
-        raise ValueError(f"players sheet must have columns exactly {expected_cols}")
+    cols = list(players_df.columns)
+    if cols not in (["team", "player", "goals"], ["team", "player", "goals", "assists"]):
+        raise ValueError("players sheet columns must be ['team','player','goals'] or ['team','player','goals','assists']")
 
-    if len(players_df) != 10:
-        raise ValueError("players sheet must contain exactly 10 rows")
+    if len(players_df) < 2:
+        raise ValueError("players sheet must contain at least 2 rows")
 
     rows: list[MatchPlayerRow] = []
     seen_players: set[str] = set()
@@ -214,12 +265,23 @@ def _parse_match_excel(path: Path, valid_player_names: set[str]) -> Match:
         if goals < 0:
             raise ValueError(f"Row {i + 2}: goals must be >= 0")
 
+        assists = 0
+        if "assists" in players_df.columns:
+            assists_value = row["assists"]
+            if pd.isna(assists_value):
+                assists_value = 0
+            if int(assists_value) != assists_value:
+                raise ValueError(f"Row {i + 2}: assists must be an integer")
+            assists = int(assists_value)
+            if assists < 0:
+                raise ValueError(f"Row {i + 2}: assists must be >= 0")
+
         seen_players.add(player)
         counts[team] += 1
-        rows.append(MatchPlayerRow(team=team, player=player, goals=goals))
+        rows.append(MatchPlayerRow(team=team, player=player, goals=goals, assists=assists))
 
-    if counts["A"] != 5 or counts["B"] != 5:
-        raise ValueError("players sheet must contain exactly 5 players in A and 5 in B")
+    if counts["A"] == 0 or counts["B"] == 0:
+        raise ValueError("players sheet must contain at least one player in each team")
 
     return Match(
         match_id=path.stem,
@@ -227,18 +289,20 @@ def _parse_match_excel(path: Path, valid_player_names: set[str]) -> Match:
         date=match_date,
         note=note,
         players=rows,
+        goals_a_override=goals_a_override,
+        goals_b_override=goals_b_override,
     )
 
 
 def load_matches(players: list[Player], deleted_match_ids: set[str] | None = None) -> tuple[list[Match], list[InvalidMatchFile]]:
-    ensure_data_layout()
+    paths = _resolve_active_paths()
     deleted = deleted_match_ids or set()
     valid_names = {p.name for p in players}
 
     matches: list[Match] = []
     invalid_files: list[InvalidMatchFile] = []
 
-    for path in sorted(MATCHES_DIR.glob("*.xlsx")):
+    for path in sorted(paths.matches_dir.glob("*.xlsx")):
         if path.stem in deleted:
             continue
         try:
@@ -264,7 +328,7 @@ def load_bundle() -> DataBundle:
 
 
 def write_match_excel(match_date: date, note: str, rows: list[MatchPlayerRow]) -> str:
-    ensure_data_layout()
+    paths = _resolve_active_paths()
 
     if len(rows) != 10:
         raise ValueError("A match must include exactly 10 player rows")
@@ -281,21 +345,34 @@ def write_match_excel(match_date: date, note: str, rows: list[MatchPlayerRow]) -
     for r in rows:
         if r.goals < 0:
             raise ValueError("Goals must be >= 0")
+        if r.assists < 0:
+            raise ValueError("Assists must be >= 0")
 
     base_date = match_date.strftime('%Y-%m-%d')
     # Keep required filename format while avoiding collisions within the same second.
     for offset in range(0, 120):
         stamp = (datetime.now() + timedelta(seconds=offset)).strftime('%H%M%S')
         candidate = f"{base_date}__{stamp}__match"
-        file_path = MATCHES_DIR / f"{candidate}.xlsx"
+        file_path = paths.matches_dir / f"{candidate}.xlsx"
         if not file_path.exists():
             match_id = candidate
             break
     else:
         raise ValueError("Could not generate a unique match filename")
 
-    meta_df = pd.DataFrame([{"key": "date", "value": match_date.strftime("%Y-%m-%d")}, {"key": "note", "value": note or ""}])
-    players_df = pd.DataFrame([{"team": r.team, "player": r.player, "goals": r.goals} for r in rows])
+    goals_a = sum(r.goals for r in team_a)
+    goals_b = sum(r.goals for r in team_b)
+    meta_df = pd.DataFrame(
+        [
+            {"key": "date", "value": match_date.strftime("%Y-%m-%d")},
+            {"key": "note", "value": note or ""},
+            {"key": "goals_a", "value": goals_a},
+            {"key": "goals_b", "value": goals_b},
+        ]
+    )
+    players_df = pd.DataFrame(
+        [{"team": r.team, "player": r.player, "goals": r.goals, "assists": r.assists} for r in rows]
+    )
 
     with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
         meta_df.to_excel(writer, sheet_name="meta", index=False)
@@ -304,48 +381,6 @@ def write_match_excel(match_date: date, note: str, rows: list[MatchPlayerRow]) -
     return match_id
 
 
-def bootstrap_mock_data_if_needed() -> None:
-    ensure_data_layout()
-
-    players = load_players()
-    has_match_files = any(MATCHES_DIR.glob("*.xlsx"))
-
-    if players and has_match_files:
-        return
-
-    if not players:
-        first_names = [
-            "Luca", "Marco", "Davide", "Andrea", "Matteo", "Francesco", "Simone", "Alessio", "Riccardo", "Stefano",
-            "Federico", "Gabriele", "Leonardo", "Tommaso", "Nicolo", "Giulio", "Edoardo", "Filippo", "Daniele", "Pietro",
-        ]
-        last_names = [
-            "Rossi", "Bianchi", "Romano", "Gallo", "Costa", "Conti", "Moretti", "Greco", "Ferrari", "Esposito",
-            "Ricci", "Marino", "Giordano", "Lombardi", "Barbieri", "Rinaldi", "Caruso", "Fontana", "Serra", "Villa",
-        ]
-        generated: list[Player] = []
-        used: set[str] = set()
-        while len(generated) < 20:
-            candidate = f"{random.choice(first_names)} {random.choice(last_names)}"
-            key = _normalize_name(candidate)
-            if key in used:
-                continue
-            used.add(key)
-            generated.append(Player(id=len(generated) + 1, name=candidate))
-        save_players(generated)
-        players = generated
-
-    if not has_match_files:
-        rng = random.Random(42)
-        today = date.today()
-        all_names = [p.name for p in players]
-        for i in range(15):
-            days_ago = rng.randint(0, 90)
-            d = today - timedelta(days=days_ago)
-            selected = rng.sample(all_names, 10)
-            rows: list[MatchPlayerRow] = []
-            for idx, name in enumerate(selected):
-                team = "A" if idx < 5 else "B"
-                goals = rng.randint(0, 4)
-                rows.append(MatchPlayerRow(team=team, player=name, goals=goals))
-            note = f"Mock match {i + 1}"
-            write_match_excel(match_date=d, note=note, rows=rows)
+def initialize_data_dirs() -> None:
+    ensure_data_layout(_build_paths(REAL_DATA_DIR))
+    ensure_data_layout(_build_paths(MOCK_DATA_DIR))
