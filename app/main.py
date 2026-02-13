@@ -45,6 +45,10 @@ def current_user(request: Request) -> str | None:
     return None
 
 
+def _normalize_name(value: str) -> str:
+    return " ".join(value.strip().split()).lower()
+
+
 def require_user(request: Request) -> RedirectResponse | None:
     user = current_user(request)
     if not user:
@@ -161,9 +165,7 @@ def players_new_page(request: Request) -> HTMLResponse:
     redirect = require_user(request)
     if redirect:
         return redirect
-
-    bundle = load_bundle()
-    return render_page(request, "player_new.html", bundle, {"error": None, "name": ""})
+    return RedirectResponse(url="/matches/new", status_code=303)
 
 
 @app.post("/players/new", response_class=HTMLResponse)
@@ -171,14 +173,7 @@ def players_new_submit(request: Request, name: str = Form(...)) -> HTMLResponse:
     redirect = require_user(request)
     if redirect:
         return redirect
-
-    bundle = load_bundle()
-    cleaned = " ".join(name.strip().split())
-    try:
-        new_player = add_player(cleaned)
-    except ValueError as exc:
-        return render_page(request, "player_new.html", bundle, {"error": str(exc), "name": cleaned})
-    return RedirectResponse(url=f"/players/{new_player.id}", status_code=303)
+    return RedirectResponse(url="/matches/new", status_code=303)
 
 
 @app.get("/players/{player_id}", response_class=HTMLResponse)
@@ -256,7 +251,7 @@ def match_soft_delete(request: Request, match_id: str) -> RedirectResponse:
     return RedirectResponse(url="/matches", status_code=303)
 
 
-def _extract_match_form(form: Any, valid_names: set[str]) -> tuple[date, str, list[MatchPlayerRow]]:
+def _extract_match_form(form: Any, valid_names: set[str]) -> tuple[date, str, list[MatchPlayerRow], list[str]]:
     date_value = str(form.get("date", "")).strip()
     note_value = str(form.get("note", "")).strip()
     if not date_value:
@@ -268,19 +263,23 @@ def _extract_match_form(form: Any, valid_names: set[str]) -> tuple[date, str, li
 
     rows: list[MatchPlayerRow] = []
     selected: list[str] = []
+    new_player_candidates: list[str] = []
 
     for team in ["A", "B"]:
         for idx in range(1, 6):
             player_key = f"team_{team}_{idx}"
+            new_player_key = f"new_team_{team}_{idx}"
             goals_key = f"goals_{team}_{idx}"
             assists_key = f"assists_{team}_{idx}"
-            player = str(form.get(player_key, "")).strip()
+            selected_player = str(form.get(player_key, "")).strip()
+            new_player_value = " ".join(str(form.get(new_player_key, "")).strip().split())
             goals_raw = str(form.get(goals_key, "")).strip()
             assists_raw = str(form.get(assists_key, "")).strip()
 
+            player = new_player_value or selected_player
             if not player:
-                raise ValueError("All 10 player slots must be selected")
-            if player not in valid_names:
+                raise ValueError("Each slot needs an existing player or a new player name")
+            if not new_player_value and _normalize_name(player) not in valid_names:
                 raise ValueError(f"Unknown player selected: {player}")
 
             if not goals_raw:
@@ -302,11 +301,22 @@ def _extract_match_form(form: Any, valid_names: set[str]) -> tuple[date, str, li
 
             rows.append(MatchPlayerRow(team=team, player=player, goals=goals, assists=assists))
             selected.append(player)
+            if new_player_value:
+                new_player_candidates.append(new_player_value)
 
-    if len(set(selected)) != 10:
+    if len({_normalize_name(name) for name in selected}) != 10:
         raise ValueError("Duplicate player selection is not allowed")
 
-    return parsed_date, note_value, rows
+    unique_new_players: list[str] = []
+    seen_new: set[str] = set()
+    for name in new_player_candidates:
+        key = _normalize_name(name)
+        if key in valid_names or key in seen_new:
+            continue
+        seen_new.add(key)
+        unique_new_players.append(name)
+
+    return parsed_date, note_value, rows, unique_new_players
 
 
 @app.post("/matches/new", response_class=HTMLResponse)
@@ -320,7 +330,13 @@ async def matches_new_submit(request: Request) -> HTMLResponse:
     form_data = dict(form)
 
     try:
-        match_date, note_value, rows = _extract_match_form(form_data, {p.name for p in bundle.players})
+        valid_names = {p.name for p in bundle.players}
+        valid_names_normalized = {_normalize_name(name) for name in valid_names}
+        match_date, note_value, rows, new_players = _extract_match_form(form_data, valid_names_normalized)
+
+        for name in new_players:
+            add_player(name)
+
         match_id = write_match_excel(match_date=match_date, note=note_value, rows=rows)
     except ValueError as exc:
         return render_page(

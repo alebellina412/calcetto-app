@@ -21,14 +21,16 @@
       <h2 class="font-semibold mb-2">Team {{ team }}</h2>
       <div class="space-y-2">
         {% for i in range(1, 6) %}
-        <div class="grid grid-cols-4 gap-2">
-          <select name="team_{{ team }}_{{ i }}" class="col-span-2 border rounded p-2" required>
-            <option value="">Select player</option>
+        <div class="grid grid-cols-6 gap-2">
+          <select name="team_{{ team }}_{{ i }}" class="col-span-2 border rounded p-2">
+            <option value="">Existing player</option>
             {% for p in players %}
             {% set key = 'team_' ~ team ~ '_' ~ i %}
             <option value="{{ p.name }}" {% if form_data.get(key) == p.name %}selected{% endif %}>{{ p.name }}</option>
             {% endfor %}
           </select>
+          {% set new_key = 'new_team_' ~ team ~ '_' ~ i %}
+          <input type="text" name="new_team_{{ team }}_{{ i }}" value="{{ form_data.get(new_key, '') }}" class="col-span-2 border rounded p-2" placeholder="Or add new player" />
           {% set goals_key = 'goals_' ~ team ~ '_' ~ i %}
           <input type="number" name="goals_{{ team }}_{{ i }}" min="0" value="{{ form_data.get(goals_key, '0') }}" class="border rounded p-2" placeholder="G" title="Goals" required />
           {% set assists_key = 'assists_' ~ team ~ '_' ~ i %}
