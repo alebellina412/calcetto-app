@@ -28,6 +28,12 @@ class PlayerStats:
     def elo_placeholder(self) -> float:
         return self.win_rate * 1000.0
 
+    @property
+    def goals_per_match(self) -> float:
+        if self.matches == 0:
+            return 0.0
+        return self.goals_scored / self.matches
+
 
 @dataclass
 class TimelinePoint:
@@ -51,6 +57,7 @@ class MatchView:
 class DashboardData:
     top_scorers: list[PlayerStats]
     top_assists: list[PlayerStats]
+    goals_per_match_ranking: list[PlayerStats]
     win_rate_ranking: list[PlayerStats]
     elo_ranking: list[PlayerStats]
     latest_matches: list[MatchView]
@@ -119,6 +126,11 @@ def build_dashboard(matches: list[Match], player_names: list[str]) -> DashboardD
 
     top_scorers = sorted(all_stats, key=lambda s: (s.goals_scored, -s.matches, s.name.lower()), reverse=True)[:10]
     top_assists = sorted(all_stats, key=lambda s: (s.assists, -s.matches, s.name.lower()), reverse=True)[:10]
+    goals_per_match_ranking = sorted(
+        [s for s in all_stats if s.matches >= 1],
+        key=lambda s: (s.goals_per_match, s.matches, s.name.lower()),
+        reverse=True,
+    )[:10]
     win_rate_ranking = sorted(
         [s for s in all_stats if s.matches >= 1],
         key=lambda s: (s.win_rate, s.matches, s.name.lower()),
@@ -131,6 +143,7 @@ def build_dashboard(matches: list[Match], player_names: list[str]) -> DashboardD
     return DashboardData(
         top_scorers=top_scorers,
         top_assists=top_assists,
+        goals_per_match_ranking=goals_per_match_ranking,
         win_rate_ranking=win_rate_ranking,
         elo_ranking=elo_ranking,
         latest_matches=latest_matches,
@@ -183,6 +196,7 @@ def player_cumulative_series(matches: list[Match], player_name: str) -> tuple[li
         "draws": {"label": "Draws", "values": []},
         "losses": {"label": "Losses", "values": []},
         "goals_scored": {"label": "Goals Scored", "values": []},
+        "goals_per_match": {"label": "Goals per Match", "values": []},
         "assists": {"label": "Assists", "values": []},
         "goals_conceded": {"label": "Goals Conceded", "values": []},
         "win_rate": {"label": "Win Rate %", "values": []},
@@ -214,6 +228,7 @@ def player_cumulative_series(matches: list[Match], player_name: str) -> tuple[li
         series["draws"]["values"].append(draws)
         series["losses"]["values"].append(losses)
         series["goals_scored"]["values"].append(goals_scored)
+        series["goals_per_match"]["values"].append(round(goals_scored / played, 3))
         series["assists"]["values"].append(assists)
         series["goals_conceded"]["values"].append(goals_conceded)
         series["win_rate"]["values"].append(round(win_rate, 2))
@@ -229,6 +244,7 @@ def serialize_for_template(player_stats: PlayerStats) -> dict[str, Any]:
         "draws": player_stats.draws,
         "losses": player_stats.losses,
         "goals_scored": player_stats.goals_scored,
+        "goals_per_match": player_stats.goals_per_match,
         "assists": player_stats.assists,
         "goals_conceded": player_stats.goals_conceded,
         "win_rate": player_stats.win_rate,

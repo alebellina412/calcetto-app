@@ -26,6 +26,17 @@
   </section>
 
   <section class="bg-white rounded-xl p-4 shadow">
+    <h2 class="font-semibold mb-2">Goals per Match</h2>
+    <ul class="space-y-1 text-sm">
+      {% for s in dashboard.goals_per_match_ranking %}
+      <li class="flex justify-between"><span>{{ s.name }}</span><strong>{{ "%.2f"|format(s.goals_per_match) }}</strong></li>
+      {% else %}
+      <li>No data.</li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="bg-white rounded-xl p-4 shadow">
     <h2 class="font-semibold mb-2">Win Rate Ranking</h2>
     <ul class="space-y-1 text-sm">
       {% for s in dashboard.win_rate_ranking %}

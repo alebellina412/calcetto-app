@@ -10,6 +10,7 @@
   <button type="button" data-metric="draws" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Draws: <strong>{{ stats.draws }}</strong></button>
   <button type="button" data-metric="losses" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Losses: <strong>{{ stats.losses }}</strong></button>
   <button type="button" data-metric="goals_scored" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Goals Scored: <strong>{{ stats.goals_scored }}</strong></button>
+  <button type="button" data-metric="goals_per_match" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Goals/Match: <strong>{{ "%.2f"|format(stats.goals_per_match) }}</strong></button>
   <button type="button" data-metric="assists" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Assists: <strong>{{ stats.assists }}</strong></button>
   <button type="button" data-metric="goals_conceded" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Goals Conceded: <strong>{{ stats.goals_conceded }}</strong></button>
   <button type="button" data-metric="win_rate" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Win Rate: <strong>{{ "%.1f"|format(stats.win_rate * 100) }}%</strong></button>
