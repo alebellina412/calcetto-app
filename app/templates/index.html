@@ -48,7 +48,7 @@
   </section>
 
   <section class="bg-white rounded-xl p-4 shadow">
-    <h2 class="font-semibold mb-2">ELO Placeholder</h2>
+    <h2 class="font-semibold mb-2">ELO</h2>
     <ul class="space-y-1 text-sm">
       {% for s in dashboard.elo_ranking %}
       <li class="flex justify-between"><span>{{ s.name }}</span><strong>{{ "%.1f"|format(s.elo_placeholder) }}</strong></li>

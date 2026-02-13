@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+import math
 from typing import Any
 
 from .data_io import Match
+
+ELO_INITIAL_RATING = 1000.0
+ELO_K_FACTOR = 24.0
+ELO_SCALE = 400.0
 
 
 @dataclass
@@ -17,6 +22,7 @@ class PlayerStats:
     goals_scored: int = 0
     assists: int = 0
     goals_conceded: int = 0
+    elo_rating: float = ELO_INITIAL_RATING
 
     @property
     def win_rate(self) -> float:
@@ -26,7 +32,8 @@ class PlayerStats:
 
     @property
     def elo_placeholder(self) -> float:
-        return self.win_rate * 1000.0
+        # Backward-compatible alias used by existing templates.
+        return self.elo_rating
 
     @property
     def goals_per_match(self) -> float:
@@ -79,7 +86,7 @@ def compute_player_stats(matches: list[Match], player_names: list[str]) -> dict[
             result_b = "win"
 
         for row in match.team_a:
-            p = stats[row.player]
+            p = stats.setdefault(row.player, PlayerStats(name=row.player))
             p.matches += 1
             p.goals_scored += row.goals
             p.assists += row.assists
@@ -92,7 +99,7 @@ def compute_player_stats(matches: list[Match], player_names: list[str]) -> dict[
                 p.draws += 1
 
         for row in match.team_b:
-            p = stats[row.player]
+            p = stats.setdefault(row.player, PlayerStats(name=row.player))
             p.matches += 1
             p.goals_scored += row.goals
             p.assists += row.assists
@@ -104,7 +111,54 @@ def compute_player_stats(matches: list[Match], player_names: list[str]) -> dict[
             else:
                 p.draws += 1
 
+    ratings = _compute_elo_ratings(matches=matches, player_names=list(stats.keys()))
+    for name, rating in ratings.items():
+        stats.setdefault(name, PlayerStats(name=name)).elo_rating = rating
+
     return stats
+
+
+def _sorted_matches(matches: list[Match]) -> list[Match]:
+    return sorted(matches, key=lambda m: (m.date, m.match_id))
+
+
+def _expected_score(team_rating: float, opp_rating: float) -> float:
+    return 1.0 / (1.0 + math.pow(10.0, (opp_rating - team_rating) / ELO_SCALE))
+
+
+def _compute_elo_ratings(matches: list[Match], player_names: list[str]) -> dict[str, float]:
+    ratings = {name: ELO_INITIAL_RATING for name in player_names}
+
+    for match in _sorted_matches(matches):
+        team_a_names = [r.player for r in match.team_a]
+        team_b_names = [r.player for r in match.team_b]
+        if not team_a_names or not team_b_names:
+            continue
+
+        for name in team_a_names + team_b_names:
+            ratings.setdefault(name, ELO_INITIAL_RATING)
+
+        rating_a = sum(ratings[name] for name in team_a_names) / len(team_a_names)
+        rating_b = sum(ratings[name] for name in team_b_names) / len(team_b_names)
+        expected_a = _expected_score(rating_a, rating_b)
+        expected_b = 1.0 - expected_a
+
+        if match.goals_a > match.goals_b:
+            actual_a, actual_b = 1.0, 0.0
+        elif match.goals_b > match.goals_a:
+            actual_a, actual_b = 0.0, 1.0
+        else:
+            actual_a = actual_b = 0.5
+
+        delta_a = ELO_K_FACTOR * (actual_a - expected_a)
+        delta_b = ELO_K_FACTOR * (actual_b - expected_b)
+
+        for name in team_a_names:
+            ratings[name] += delta_a
+        for name in team_b_names:
+            ratings[name] += delta_b
+
+    return ratings
 
 
 def match_to_view(match: Match) -> MatchView:
@@ -136,7 +190,7 @@ def build_dashboard(matches: list[Match], player_names: list[str]) -> DashboardD
         key=lambda s: (s.win_rate, s.matches, s.name.lower()),
         reverse=True,
     )[:10]
-    elo_ranking = sorted(all_stats, key=lambda s: (s.elo_placeholder, s.matches, s.name.lower()), reverse=True)[:10]
+    elo_ranking = sorted(all_stats, key=lambda s: (s.elo_rating, s.matches, s.name.lower()), reverse=True)[:10]
 
     latest_matches = [match_to_view(m) for m in matches[:10]]
 
@@ -151,28 +205,41 @@ def build_dashboard(matches: list[Match], player_names: list[str]) -> DashboardD
 
 
 def player_elo_timeline(matches: list[Match], player_name: str) -> list[TimelinePoint]:
-    relevant = []
-    for m in matches:
-        if any(r.player == player_name for r in m.players):
-            relevant.append(m)
-
-    relevant.sort(key=lambda x: (x.date, x.match_id))
-
-    wins = draws = losses = 0
     timeline: list[TimelinePoint] = []
 
-    for match in relevant:
-        on_team_a = any(r.player == player_name for r in match.team_a)
-        if match.goals_a == match.goals_b:
-            draws += 1
-        elif (on_team_a and match.goals_a > match.goals_b) or (not on_team_a and match.goals_b > match.goals_a):
-            wins += 1
-        else:
-            losses += 1
+    # Recompute progressively to expose per-match historical points.
+    running = {player_name: ELO_INITIAL_RATING}
+    for match in _sorted_matches(matches):
+        team_a_names = [r.player for r in match.team_a]
+        team_b_names = [r.player for r in match.team_b]
+        if not team_a_names or not team_b_names:
+            continue
 
-        played = wins + draws + losses
-        win_rate = wins / played if played else 0.0
-        timeline.append(TimelinePoint(date=match.date.strftime("%Y-%m-%d"), elo=win_rate * 1000.0))
+        for name in team_a_names + team_b_names:
+            running.setdefault(name, ELO_INITIAL_RATING)
+
+        rating_a = sum(running[name] for name in team_a_names) / len(team_a_names)
+        rating_b = sum(running[name] for name in team_b_names) / len(team_b_names)
+        expected_a = _expected_score(rating_a, rating_b)
+        expected_b = 1.0 - expected_a
+
+        if match.goals_a > match.goals_b:
+            actual_a, actual_b = 1.0, 0.0
+        elif match.goals_b > match.goals_a:
+            actual_a, actual_b = 0.0, 1.0
+        else:
+            actual_a = actual_b = 0.5
+
+        delta_a = ELO_K_FACTOR * (actual_a - expected_a)
+        delta_b = ELO_K_FACTOR * (actual_b - expected_b)
+
+        for name in team_a_names:
+            running[name] += delta_a
+        for name in team_b_names:
+            running[name] += delta_b
+
+        if player_name in team_a_names or player_name in team_b_names:
+            timeline.append(TimelinePoint(date=match.date.strftime("%Y-%m-%d"), elo=round(running[player_name], 2)))
 
     return timeline
 
@@ -183,15 +250,13 @@ def player_matches_views(matches: list[Match], player_name: str) -> list[MatchVi
 
 
 def player_cumulative_series(matches: list[Match], player_name: str) -> tuple[list[str], dict[str, dict[str, Any]]]:
-    relevant = [m for m in matches if any(r.player == player_name for r in m.players)]
-    relevant.sort(key=lambda x: (x.date, x.match_id))
-
     labels: list[str] = []
     wins = draws = losses = 0
     goals_scored = assists = goals_conceded = 0
+    ratings: dict[str, float] = {}
 
     series = {
-        "elo": {"label": "ELO Placeholder", "values": []},
+        "elo": {"label": "ELO", "values": []},
         "wins": {"label": "Wins", "values": []},
         "draws": {"label": "Draws", "values": []},
         "losses": {"label": "Losses", "values": []},
@@ -202,7 +267,38 @@ def player_cumulative_series(matches: list[Match], player_name: str) -> tuple[li
         "win_rate": {"label": "Win Rate %", "values": []},
     }
 
-    for match in relevant:
+    for match in _sorted_matches(matches):
+        team_a_names = [r.player for r in match.team_a]
+        team_b_names = [r.player for r in match.team_b]
+        if not team_a_names or not team_b_names:
+            continue
+
+        for name in team_a_names + team_b_names:
+            ratings.setdefault(name, ELO_INITIAL_RATING)
+
+        rating_a = sum(ratings[name] for name in team_a_names) / len(team_a_names)
+        rating_b = sum(ratings[name] for name in team_b_names) / len(team_b_names)
+        expected_a = _expected_score(rating_a, rating_b)
+        expected_b = 1.0 - expected_a
+
+        if match.goals_a > match.goals_b:
+            actual_a, actual_b = 1.0, 0.0
+        elif match.goals_b > match.goals_a:
+            actual_a, actual_b = 0.0, 1.0
+        else:
+            actual_a = actual_b = 0.5
+
+        delta_a = ELO_K_FACTOR * (actual_a - expected_a)
+        delta_b = ELO_K_FACTOR * (actual_b - expected_b)
+
+        for name in team_a_names:
+            ratings[name] += delta_a
+        for name in team_b_names:
+            ratings[name] += delta_b
+
+        if player_name not in team_a_names and player_name not in team_b_names:
+            continue
+
         on_team_a = any(r.player == player_name for r in match.team_a)
         player_goals = sum(r.goals for r in match.players if r.player == player_name)
         player_assists = sum(r.assists for r in match.players if r.player == player_name)
@@ -220,7 +316,7 @@ def player_cumulative_series(matches: list[Match], player_name: str) -> tuple[li
 
         played = wins + draws + losses
         win_rate = (wins / played) * 100.0 if played else 0.0
-        elo = (wins / played) * 1000.0 if played else 0.0
+        elo = ratings.get(player_name, ELO_INITIAL_RATING)
 
         labels.append(match.date.strftime("%Y-%m-%d"))
         series["elo"]["values"].append(round(elo, 2))
@@ -248,6 +344,7 @@ def serialize_for_template(player_stats: PlayerStats) -> dict[str, Any]:
         "assists": player_stats.assists,
         "goals_conceded": player_stats.goals_conceded,
         "win_rate": player_stats.win_rate,
+        "elo_rating": player_stats.elo_rating,
         "elo_placeholder": player_stats.elo_placeholder,
     }
 

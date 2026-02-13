@@ -49,6 +49,19 @@ def _normalize_name(value: str) -> str:
     return " ".join(value.strip().split()).lower()
 
 
+def _parse_match_note(note: str) -> dict[str, str]:
+    info: dict[str, str] = {}
+    for part in note.split(";"):
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        key = key.strip().lower()
+        value = value.strip()
+        if key and value:
+            info[key] = value
+    return info
+
+
 def require_user(request: Request) -> RedirectResponse | None:
     user = current_user(request)
     if not user:
@@ -237,8 +250,15 @@ def match_detail(request: Request, match_id: str) -> HTMLResponse:
     match = next((m for m in bundle.matches if m.match_id == match_id), None)
     if not match:
         raise HTTPException(status_code=404, detail="Match not found")
-
-    return render_page(request, "match_detail.html", bundle, {"match": match})
+    note_info = _parse_match_note(match.note or "")
+    extra = {
+        "match": match,
+        "match_source": note_info.get("source", ""),
+        "match_row": note_info.get("row", ""),
+        "match_campo": note_info.get("campo", ""),
+        "match_mvp": note_info.get("mvp", ""),
+    }
+    return render_page(request, "match_detail.html", bundle, extra)
 
 
 @app.post("/matches/{match_id}/delete")

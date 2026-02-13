@@ -14,11 +14,11 @@
   <button type="button" data-metric="assists" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Assists: <strong>{{ stats.assists }}</strong></button>
   <button type="button" data-metric="goals_conceded" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Goals Conceded: <strong>{{ stats.goals_conceded }}</strong></button>
   <button type="button" data-metric="win_rate" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Win Rate: <strong>{{ "%.1f"|format(stats.win_rate * 100) }}%</strong></button>
-  <button type="button" data-metric="elo" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">ELO Placeholder: <strong>{{ "%.1f"|format(stats.elo_placeholder) }}</strong></button>
+  <button type="button" data-metric="elo" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">ELO: <strong>{{ "%.1f"|format(stats.elo_placeholder) }}</strong></button>
 </div>
 
 <div class="bg-white rounded-xl p-4 shadow">
-  <h2 id="metricTitle" class="font-semibold mb-2">ELO Placeholder Over Time</h2>
+  <h2 id="metricTitle" class="font-semibold mb-2">ELO Over Time</h2>
   <canvas id="eloChart"></canvas>
 </div>
 
@@ -51,7 +51,7 @@ const chart = new Chart(ctx, {
   data: {
     labels,
     datasets: [{
-      label: 'ELO Placeholder',
+      label: 'ELO',
       data: series.elo.values,
       borderColor: '#2563eb',
       backgroundColor: 'rgba(37, 99, 235, 0.15)',
