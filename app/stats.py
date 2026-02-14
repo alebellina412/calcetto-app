@@ -249,6 +249,49 @@ def player_matches_views(matches: list[Match], player_name: str) -> list[MatchVi
     return [match_to_view(m) for m in filtered]
 
 
+def comparison_matches_views(
+    matches: list[Match], primary_player: str, secondary_player: str
+) -> tuple[list[MatchView], list[MatchView], list[MatchView]]:
+    together: list[MatchView] = []
+    only_primary: list[MatchView] = []
+    only_secondary: list[MatchView] = []
+
+    for match in matches:
+        primary_in = any(r.player == primary_player for r in match.players)
+        secondary_in = any(r.player == secondary_player for r in match.players)
+        if primary_in and secondary_in:
+            together.append(match_to_view(match))
+        elif primary_in:
+            only_primary.append(match_to_view(match))
+        elif secondary_in:
+            only_secondary.append(match_to_view(match))
+
+    return together, only_primary, only_secondary
+
+
+def multi_player_matches_views(
+    matches: list[Match], primary_player: str, compare_players: list[str]
+) -> tuple[list[MatchView], list[MatchView], dict[str, list[MatchView]]]:
+    together: list[MatchView] = []
+    primary_only: list[MatchView] = []
+    compare_only: dict[str, list[MatchView]] = {name: [] for name in compare_players}
+    compare_set = set(compare_players)
+
+    for match in matches:
+        names_in_match = {r.player for r in match.players}
+        primary_in = primary_player in names_in_match
+        compare_in = [name for name in compare_players if name in names_in_match]
+        if primary_in and len(compare_in) == len(compare_players):
+            together.append(match_to_view(match))
+        if primary_in and not (names_in_match & compare_set):
+            primary_only.append(match_to_view(match))
+        if not primary_in:
+            for name in compare_in:
+                compare_only[name].append(match_to_view(match))
+
+    return together, primary_only, compare_only
+
+
 def player_cumulative_series(matches: list[Match], player_name: str) -> tuple[list[str], dict[str, dict[str, Any]]]:
     labels: list[str] = []
     wins = draws = losses = 0
@@ -330,6 +373,347 @@ def player_cumulative_series(matches: list[Match], player_name: str) -> tuple[li
         series["win_rate"]["values"].append(round(win_rate, 2))
 
     return labels, series
+
+
+def multi_player_cumulative_series(
+    matches: list[Match], player_names: list[str]
+) -> tuple[list[str], dict[str, dict[str, Any]]]:
+    labels: list[str] = []
+    ratings: dict[str, float] = {}
+    counters = {
+        name: {"wins": 0, "draws": 0, "losses": 0, "goals_scored": 0, "assists": 0, "goals_conceded": 0}
+        for name in player_names
+    }
+    series = {
+        "elo": {"label": "ELO", "values_by_player": {name: [] for name in player_names}},
+        "wins": {"label": "Wins", "values_by_player": {name: [] for name in player_names}},
+        "draws": {"label": "Draws", "values_by_player": {name: [] for name in player_names}},
+        "losses": {"label": "Losses", "values_by_player": {name: [] for name in player_names}},
+        "goals_scored": {"label": "Goals Scored", "values_by_player": {name: [] for name in player_names}},
+        "goals_per_match": {"label": "Goals per Match", "values_by_player": {name: [] for name in player_names}},
+        "assists": {"label": "Assists", "values_by_player": {name: [] for name in player_names}},
+        "goals_conceded": {"label": "Goals Conceded", "values_by_player": {name: [] for name in player_names}},
+        "win_rate": {"label": "Win Rate %", "values_by_player": {name: [] for name in player_names}},
+    }
+
+    selected = set(player_names)
+    for match in _sorted_matches(matches):
+        team_a_names = [r.player for r in match.team_a]
+        team_b_names = [r.player for r in match.team_b]
+        if not team_a_names or not team_b_names:
+            continue
+
+        for name in team_a_names + team_b_names:
+            ratings.setdefault(name, ELO_INITIAL_RATING)
+
+        rating_a = sum(ratings[name] for name in team_a_names) / len(team_a_names)
+        rating_b = sum(ratings[name] for name in team_b_names) / len(team_b_names)
+        expected_a = _expected_score(rating_a, rating_b)
+        expected_b = 1.0 - expected_a
+
+        if match.goals_a > match.goals_b:
+            actual_a, actual_b = 1.0, 0.0
+        elif match.goals_b > match.goals_a:
+            actual_a, actual_b = 0.0, 1.0
+        else:
+            actual_a = actual_b = 0.5
+
+        delta_a = ELO_K_FACTOR * (actual_a - expected_a)
+        delta_b = ELO_K_FACTOR * (actual_b - expected_b)
+
+        for name in team_a_names:
+            ratings[name] += delta_a
+        for name in team_b_names:
+            ratings[name] += delta_b
+
+        names_in_match = {r.player for r in match.players}
+        played_selected = list(names_in_match & selected)
+        if not played_selected:
+            continue
+
+        labels.append(match.date.strftime("%Y-%m-%d"))
+        snapshots: dict[str, dict[str, float | int]] = {}
+
+        for player_name in played_selected:
+            on_team_a = player_name in team_a_names
+            player_goals = sum(r.goals for r in match.players if r.player == player_name)
+            player_assists = sum(r.assists for r in match.players if r.player == player_name)
+
+            if match.goals_a == match.goals_b:
+                counters[player_name]["draws"] += 1
+            elif (on_team_a and match.goals_a > match.goals_b) or (not on_team_a and match.goals_b > match.goals_a):
+                counters[player_name]["wins"] += 1
+            else:
+                counters[player_name]["losses"] += 1
+
+            counters[player_name]["goals_scored"] += player_goals
+            counters[player_name]["assists"] += player_assists
+            counters[player_name]["goals_conceded"] += match.goals_b if on_team_a else match.goals_a
+
+            played = counters[player_name]["wins"] + counters[player_name]["draws"] + counters[player_name]["losses"]
+            win_rate = (counters[player_name]["wins"] / played) * 100.0 if played else 0.0
+            snapshots[player_name] = {
+                "elo": round(ratings.get(player_name, ELO_INITIAL_RATING), 2),
+                "wins": counters[player_name]["wins"],
+                "draws": counters[player_name]["draws"],
+                "losses": counters[player_name]["losses"],
+                "goals_scored": counters[player_name]["goals_scored"],
+                "goals_per_match": round(counters[player_name]["goals_scored"] / played, 3) if played else 0.0,
+                "assists": counters[player_name]["assists"],
+                "goals_conceded": counters[player_name]["goals_conceded"],
+                "win_rate": round(win_rate, 2),
+            }
+
+        for metric in series.keys():
+            for player_name in player_names:
+                value = snapshots.get(player_name, {}).get(metric) if player_name in snapshots else None
+                series[metric]["values_by_player"][player_name].append(value)
+
+    return labels, series
+
+
+def comparison_cumulative_series(
+    matches: list[Match], primary_player: str, secondary_player: str
+) -> tuple[list[str], dict[str, dict[str, Any]]]:
+    labels: list[str] = []
+    ratings: dict[str, float] = {}
+    players = [primary_player, secondary_player]
+    counters = {
+        primary_player: {"wins": 0, "draws": 0, "losses": 0, "goals_scored": 0, "assists": 0, "goals_conceded": 0},
+        secondary_player: {"wins": 0, "draws": 0, "losses": 0, "goals_scored": 0, "assists": 0, "goals_conceded": 0},
+    }
+
+    series = {
+        "elo": {"label": "ELO", "primary_values": [], "secondary_values": []},
+        "wins": {"label": "Wins", "primary_values": [], "secondary_values": []},
+        "draws": {"label": "Draws", "primary_values": [], "secondary_values": []},
+        "losses": {"label": "Losses", "primary_values": [], "secondary_values": []},
+        "goals_scored": {"label": "Goals Scored", "primary_values": [], "secondary_values": []},
+        "goals_per_match": {"label": "Goals per Match", "primary_values": [], "secondary_values": []},
+        "assists": {"label": "Assists", "primary_values": [], "secondary_values": []},
+        "goals_conceded": {"label": "Goals Conceded", "primary_values": [], "secondary_values": []},
+        "win_rate": {"label": "Win Rate %", "primary_values": [], "secondary_values": []},
+    }
+
+    for match in _sorted_matches(matches):
+        team_a_names = [r.player for r in match.team_a]
+        team_b_names = [r.player for r in match.team_b]
+        if not team_a_names or not team_b_names:
+            continue
+
+        for name in team_a_names + team_b_names:
+            ratings.setdefault(name, ELO_INITIAL_RATING)
+
+        rating_a = sum(ratings[name] for name in team_a_names) / len(team_a_names)
+        rating_b = sum(ratings[name] for name in team_b_names) / len(team_b_names)
+        expected_a = _expected_score(rating_a, rating_b)
+        expected_b = 1.0 - expected_a
+
+        if match.goals_a > match.goals_b:
+            actual_a, actual_b = 1.0, 0.0
+        elif match.goals_b > match.goals_a:
+            actual_a, actual_b = 0.0, 1.0
+        else:
+            actual_a = actual_b = 0.5
+
+        delta_a = ELO_K_FACTOR * (actual_a - expected_a)
+        delta_b = ELO_K_FACTOR * (actual_b - expected_b)
+
+        for name in team_a_names:
+            ratings[name] += delta_a
+        for name in team_b_names:
+            ratings[name] += delta_b
+
+        played_by = {
+            primary_player: primary_player in team_a_names or primary_player in team_b_names,
+            secondary_player: secondary_player in team_a_names or secondary_player in team_b_names,
+        }
+        if not played_by[primary_player] and not played_by[secondary_player]:
+            continue
+
+        labels.append(match.date.strftime("%Y-%m-%d"))
+
+        snapshots: dict[str, dict[str, float | int]] = {}
+        for player_name in players:
+            if not played_by[player_name]:
+                continue
+            on_team_a = player_name in team_a_names
+            player_goals = sum(r.goals for r in match.players if r.player == player_name)
+            player_assists = sum(r.assists for r in match.players if r.player == player_name)
+
+            if match.goals_a == match.goals_b:
+                counters[player_name]["draws"] += 1
+            elif (on_team_a and match.goals_a > match.goals_b) or (not on_team_a and match.goals_b > match.goals_a):
+                counters[player_name]["wins"] += 1
+            else:
+                counters[player_name]["losses"] += 1
+
+            counters[player_name]["goals_scored"] += player_goals
+            counters[player_name]["assists"] += player_assists
+            counters[player_name]["goals_conceded"] += match.goals_b if on_team_a else match.goals_a
+
+            played = counters[player_name]["wins"] + counters[player_name]["draws"] + counters[player_name]["losses"]
+            win_rate = (counters[player_name]["wins"] / played) * 100.0 if played else 0.0
+
+            snapshots[player_name] = {
+                "elo": round(ratings.get(player_name, ELO_INITIAL_RATING), 2),
+                "wins": counters[player_name]["wins"],
+                "draws": counters[player_name]["draws"],
+                "losses": counters[player_name]["losses"],
+                "goals_scored": counters[player_name]["goals_scored"],
+                "goals_per_match": round(counters[player_name]["goals_scored"] / played, 3) if played else 0.0,
+                "assists": counters[player_name]["assists"],
+                "goals_conceded": counters[player_name]["goals_conceded"],
+                "win_rate": round(win_rate, 2),
+            }
+
+        for metric in series.keys():
+            primary_value = snapshots.get(primary_player, {}).get(metric) if played_by[primary_player] else None
+            secondary_value = snapshots.get(secondary_player, {}).get(metric) if played_by[secondary_player] else None
+            series[metric]["primary_values"].append(primary_value)
+            series[metric]["secondary_values"].append(secondary_value)
+
+    return labels, series
+
+
+def combined_together_stats(matches: list[Match], player_names: list[str]) -> dict[str, float | int]:
+    if not player_names:
+        return {
+            "matches": 0,
+            "wins": 0,
+            "draws": 0,
+            "losses": 0,
+            "win_rate": 0.0,
+            "group_goals": 0,
+            "group_assists": 0,
+            "team_goals_for": 0,
+            "team_goals_against": 0,
+            "avg_goal_diff": 0.0,
+        }
+
+    def _team_of(match: Match, player_name: str) -> str | None:
+        for row in match.team_a:
+            if row.player == player_name:
+                return "A"
+        for row in match.team_b:
+            if row.player == player_name:
+                return "B"
+        return None
+
+    matches_count = wins = draws = losses = 0
+    group_goals = group_assists = 0
+    team_goals_for = team_goals_against = 0
+
+    selected = set(player_names)
+    for match in matches:
+        teams = {name: _team_of(match, name) for name in selected}
+        if any(team is None for team in teams.values()):
+            continue
+
+        first_team = next(iter(teams.values()))
+        if any(team != first_team for team in teams.values()):
+            continue
+        if first_team is None:
+            continue
+
+        matches_count += 1
+        team_for = match.goals_a if first_team == "A" else match.goals_b
+        team_against = match.goals_b if first_team == "A" else match.goals_a
+        team_goals_for += team_for
+        team_goals_against += team_against
+
+        if team_for > team_against:
+            wins += 1
+        elif team_for < team_against:
+            losses += 1
+        else:
+            draws += 1
+
+        for row in match.players:
+            if row.player in selected:
+                group_goals += row.goals
+                group_assists += row.assists
+
+    win_rate = (wins / matches_count) * 100.0 if matches_count else 0.0
+    avg_goal_diff = ((team_goals_for - team_goals_against) / matches_count) if matches_count else 0.0
+    return {
+        "matches": matches_count,
+        "wins": wins,
+        "draws": draws,
+        "losses": losses,
+        "win_rate": round(win_rate, 2),
+        "group_goals": group_goals,
+        "group_assists": group_assists,
+        "team_goals_for": team_goals_for,
+        "team_goals_against": team_goals_against,
+        "avg_goal_diff": round(avg_goal_diff, 2),
+    }
+
+
+def primary_on_off_stats(matches: list[Match], primary_player: str, partners: list[str]) -> dict[str, dict[str, float | int]]:
+    def _empty_bucket() -> dict[str, float | int]:
+        return {
+            "matches": 0,
+            "wins": 0,
+            "draws": 0,
+            "losses": 0,
+            "win_rate": 0.0,
+            "goals_for": 0,
+            "goals_against": 0,
+            "primary_goals": 0,
+            "primary_assists": 0,
+        }
+
+    def _team_of(match: Match, player_name: str) -> str | None:
+        for row in match.team_a:
+            if row.player == player_name:
+                return "A"
+        for row in match.team_b:
+            if row.player == player_name:
+                return "B"
+        return None
+
+    with_group = _empty_bucket()
+    without_group = _empty_bucket()
+
+    for match in matches:
+        primary_team = _team_of(match, primary_player)
+        if primary_team is None:
+            continue
+
+        partners_same_team = True
+        for partner in partners:
+            partner_team = _team_of(match, partner)
+            if partner_team != primary_team:
+                partners_same_team = False
+                break
+
+        bucket = with_group if partners_same_team else without_group
+        bucket["matches"] += 1
+
+        goals_for = match.goals_a if primary_team == "A" else match.goals_b
+        goals_against = match.goals_b if primary_team == "A" else match.goals_a
+        bucket["goals_for"] += goals_for
+        bucket["goals_against"] += goals_against
+
+        if goals_for > goals_against:
+            bucket["wins"] += 1
+        elif goals_for < goals_against:
+            bucket["losses"] += 1
+        else:
+            bucket["draws"] += 1
+
+        for row in match.players:
+            if row.player == primary_player:
+                bucket["primary_goals"] += row.goals
+                bucket["primary_assists"] += row.assists
+
+    for bucket in (with_group, without_group):
+        played = int(bucket["matches"])
+        wins = int(bucket["wins"])
+        bucket["win_rate"] = round((wins / played) * 100.0, 2) if played else 0.0
+
+    return {"with_group": with_group, "without_group": without_group}
 
 
 def serialize_for_template(player_stats: PlayerStats) -> dict[str, Any]:

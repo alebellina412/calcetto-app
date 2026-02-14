@@ -1,20 +1,55 @@
 {% extends "base.html" %}
 {% block title %}{{ player.name }} - Calcetto{% endblock %}
 {% block content %}
+<style>
+  .metric-card-active strong {
+    color: #ffffff !important;
+  }
+</style>
 <h1 class="text-xl font-bold mb-3">{{ player.name }}</h1>
+{% if compare_active or group_active %}
+<section class="bg-white rounded-xl p-4 shadow mb-3 border-l-4 {% if compare_active %}border-blue-600{% else %}border-amber-500{% endif %}">
+  <h2 class="font-extrabold tracking-wide text-sm {% if compare_active %}text-blue-700{% else %}text-amber-700{% endif %}">
+    {% if compare_active %}MODALITA COMPARAZIONE{% else %}MODALITA STATISTICHE COMBINATE{% endif %}
+  </h2>
+  <div class="mt-2 text-sm">
+    <strong class="text-blue-700">{{ player.name }}</strong>
+    {% if compare_active %}
+      {% for cp in compare_selected_players %}
+      + <strong class="{{ compare_palette[loop.index0].text_class }}">{{ cp.name }}</strong>
+      {% endfor %}
+    {% else %}
+      {% for cp in combo_selected_players %}
+      + <strong class="{{ compare_palette[loop.index0].text_class }}">{{ cp.name }}</strong>
+      {% endfor %}
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+{% if compare_warnings %}
+<div class="bg-amber-50 border border-amber-300 rounded p-3 mb-3 text-sm text-amber-800">
+  {% for w in compare_warnings %}<div>{{ w }}</div>{% endfor %}
+</div>
+{% endif %}
+
 <div class="grid grid-cols-2 gap-2 mb-4 text-sm">
   <button type="button" data-target="player-matches" class="stat-open-matches bg-white rounded p-3 shadow text-left hover:bg-slate-50">
-    Matches: <strong>{{ stats.matches }}</strong>
+    Matches:
+    <strong class="text-blue-700">{{ stats.matches }}</strong>
+    {% for cs in compare_stats_list %}
+    <span>/</span><strong class="{{ compare_palette[loop.index0].text_class }}">{{ cs.matches }}</strong>
+    {% endfor %}
   </button>
-  <button type="button" data-metric="wins" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Wins: <strong>{{ stats.wins }}</strong></button>
-  <button type="button" data-metric="draws" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Draws: <strong>{{ stats.draws }}</strong></button>
-  <button type="button" data-metric="losses" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Losses: <strong>{{ stats.losses }}</strong></button>
-  <button type="button" data-metric="goals_scored" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Goals Scored: <strong>{{ stats.goals_scored }}</strong></button>
-  <button type="button" data-metric="goals_per_match" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Goals/Match: <strong>{{ "%.2f"|format(stats.goals_per_match) }}</strong></button>
-  <button type="button" data-metric="assists" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Assists: <strong>{{ stats.assists }}</strong></button>
-  <button type="button" data-metric="goals_conceded" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Goals Conceded: <strong>{{ stats.goals_conceded }}</strong></button>
-  <button type="button" data-metric="win_rate" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Win Rate: <strong>{{ "%.1f"|format(stats.win_rate * 100) }}%</strong></button>
-  <button type="button" data-metric="elo" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">ELO: <strong>{{ "%.1f"|format(stats.elo_placeholder) }}</strong></button>
+  <button type="button" data-metric="wins" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Wins: <strong class="text-blue-700">{{ stats.wins }}</strong>{% for cs in compare_stats_list %}<span>/</span><strong class="{{ compare_palette[loop.index0].text_class }}">{{ cs.wins }}</strong>{% endfor %}</button>
+  <button type="button" data-metric="draws" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Draws: <strong class="text-blue-700">{{ stats.draws }}</strong>{% for cs in compare_stats_list %}<span>/</span><strong class="{{ compare_palette[loop.index0].text_class }}">{{ cs.draws }}</strong>{% endfor %}</button>
+  <button type="button" data-metric="losses" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Losses: <strong class="text-blue-700">{{ stats.losses }}</strong>{% for cs in compare_stats_list %}<span>/</span><strong class="{{ compare_palette[loop.index0].text_class }}">{{ cs.losses }}</strong>{% endfor %}</button>
+  <button type="button" data-metric="goals_scored" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Goals Scored: <strong class="text-blue-700">{{ stats.goals_scored }}</strong>{% for cs in compare_stats_list %}<span>/</span><strong class="{{ compare_palette[loop.index0].text_class }}">{{ cs.goals_scored }}</strong>{% endfor %}</button>
+  <button type="button" data-metric="goals_per_match" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Goals/Match: <strong class="text-blue-700">{{ "%.2f"|format(stats.goals_per_match) }}</strong>{% for cs in compare_stats_list %}<span>/</span><strong class="{{ compare_palette[loop.index0].text_class }}">{{ "%.2f"|format(cs.goals_per_match) }}</strong>{% endfor %}</button>
+  <button type="button" data-metric="assists" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Assists: <strong class="text-blue-700">{{ stats.assists }}</strong>{% for cs in compare_stats_list %}<span>/</span><strong class="{{ compare_palette[loop.index0].text_class }}">{{ cs.assists }}</strong>{% endfor %}</button>
+  <button type="button" data-metric="goals_conceded" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Goals Conceded: <strong class="text-blue-700">{{ stats.goals_conceded }}</strong>{% for cs in compare_stats_list %}<span>/</span><strong class="{{ compare_palette[loop.index0].text_class }}">{{ cs.goals_conceded }}</strong>{% endfor %}</button>
+  <button type="button" data-metric="win_rate" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Win Rate: <strong class="text-blue-700">{{ "%.1f"|format(stats.win_rate * 100) }}%</strong>{% for cs in compare_stats_list %}<span>/</span><strong class="{{ compare_palette[loop.index0].text_class }}">{{ "%.1f"|format(cs.win_rate * 100) }}%</strong>{% endfor %}</button>
+  <button type="button" data-metric="elo" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">ELO: <strong class="text-blue-700">{{ "%.1f"|format(stats.elo_placeholder) }}</strong>{% for cs in compare_stats_list %}<span>/</span><strong class="{{ compare_palette[loop.index0].text_class }}">{{ "%.1f"|format(cs.elo_placeholder) }}</strong>{% endfor %}</button>
 </div>
 
 <div class="bg-white rounded-xl p-4 shadow">
@@ -22,10 +57,228 @@
   <canvas id="eloChart"></canvas>
 </div>
 
+<form id="controlForm" method="get" class="bg-white rounded-xl p-4 shadow mt-4 text-sm border border-slate-200">
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+    <div id="compareBox" class="rounded-lg border border-blue-200 bg-blue-50/40 p-3">
+      <div class="flex items-center justify-between mb-1">
+        <label class="text-slate-800 font-semibold">Compara con (max 3)</label>
+        <button type="button" id="addCompareBtn" class="text-xs underline font-medium">Aggiungi player</button>
+      </div>
+      {% set cmp_1 = compare_selected_ids[0] if compare_selected_ids|length > 0 else None %}
+      {% set cmp_2 = compare_selected_ids[1] if compare_selected_ids|length > 1 else None %}
+      {% set cmp_3 = compare_selected_ids[2] if compare_selected_ids|length > 2 else None %}
+      <div class="space-y-1">
+        <div class="flex items-center gap-2 compare-row" data-idx="1">
+          <select name="compare_with" class="compare-select w-full border rounded px-2 py-1 text-sm">
+            <option value="">Seleziona giocatore</option>
+            {% for candidate in compare_candidates %}
+            <option value="{{ candidate.id }}" {% if cmp_1 == candidate.id %}selected{% endif %}>{{ candidate.name }}</option>
+            {% endfor %}
+          </select>
+          <button type="button" class="remove-compare text-xs underline">Rimuovi</button>
+        </div>
+        <div class="flex items-center gap-2 compare-row" data-idx="2">
+          <select name="compare_with" class="compare-select w-full border rounded px-2 py-1 text-sm">
+            <option value="">Seleziona giocatore</option>
+            {% for candidate in compare_candidates %}
+            <option value="{{ candidate.id }}" {% if cmp_2 == candidate.id %}selected{% endif %}>{{ candidate.name }}</option>
+            {% endfor %}
+          </select>
+          <button type="button" class="remove-compare text-xs underline">Rimuovi</button>
+        </div>
+        <div class="flex items-center gap-2 compare-row" data-idx="3">
+          <select name="compare_with" class="compare-select w-full border rounded px-2 py-1 text-sm">
+            <option value="">Seleziona giocatore</option>
+            {% for candidate in compare_candidates %}
+            <option value="{{ candidate.id }}" {% if cmp_3 == candidate.id %}selected{% endif %}>{{ candidate.name }}</option>
+            {% endfor %}
+          </select>
+          <button type="button" class="remove-compare text-xs underline">Rimuovi</button>
+        </div>
+      </div>
+      <div class="mt-1">
+        <button type="button" id="clearCompareBtn" class="text-xs underline">Rimuovi tutti (compara)</button>
+      </div>
+    </div>
+
+    <div id="groupBox" class="rounded-lg border border-amber-200 bg-amber-50/40 p-3">
+      <label for="combo_size" class="block text-slate-800 mb-1 font-semibold">Statistiche combinate</label>
+      <select id="combo_size" name="combo_size" class="w-full border rounded px-2 py-1 text-sm mb-2">
+        <option value="2" {% if combo_size == 2 %}selected{% endif %}>Coppia</option>
+        <option value="3" {% if combo_size == 3 %}selected{% endif %}>Tripletta</option>
+        <option value="4" {% if combo_size == 4 %}selected{% endif %}>Quadripletta</option>
+      </select>
+      <div class="space-y-1">
+        {% set combo_1 = combo_selected_ids[0] if combo_selected_ids|length > 0 else None %}
+        {% set combo_2 = combo_selected_ids[1] if combo_selected_ids|length > 1 else None %}
+        {% set combo_3 = combo_selected_ids[2] if combo_selected_ids|length > 2 else None %}
+        <div class="flex items-center gap-2 group-row" data-idx="1">
+          <select name="combo_with" class="combo-partner w-full border rounded px-2 py-1 text-sm">
+            <option value="">Seleziona partner 1</option>
+            {% for candidate in compare_candidates %}
+            <option value="{{ candidate.id }}" {% if combo_1 == candidate.id %}selected{% endif %}>{{ candidate.name }}</option>
+            {% endfor %}
+          </select>
+          <button type="button" class="remove-group text-xs underline">Rimuovi</button>
+        </div>
+        <div class="flex items-center gap-2 group-row" data-idx="2">
+          <select name="combo_with" class="combo-partner w-full border rounded px-2 py-1 text-sm">
+            <option value="">Seleziona partner 2</option>
+            {% for candidate in compare_candidates %}
+            <option value="{{ candidate.id }}" {% if combo_2 == candidate.id %}selected{% endif %}>{{ candidate.name }}</option>
+            {% endfor %}
+          </select>
+          <button type="button" class="remove-group text-xs underline">Rimuovi</button>
+        </div>
+        <div class="flex items-center gap-2 group-row" data-idx="3">
+          <select name="combo_with" class="combo-partner w-full border rounded px-2 py-1 text-sm">
+            <option value="">Seleziona partner 3</option>
+            {% for candidate in compare_candidates %}
+            <option value="{{ candidate.id }}" {% if combo_3 == candidate.id %}selected{% endif %}>{{ candidate.name }}</option>
+            {% endfor %}
+          </select>
+          <button type="button" class="remove-group text-xs underline">Rimuovi</button>
+        </div>
+      </div>
+      <div class="mt-1">
+        <button type="button" id="clearGroupBtn" class="text-xs underline">Rimuovi tutti (gruppo)</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="mt-3 text-xs text-slate-600 space-y-1">
+    <div><strong class="text-slate-700">Compara con:</strong> confronta il giocatore principale con fino a 3 altri giocatori (curve blu/rosso/verde/arancio) su tutto lo storico disponibile, anche senza partite in comune.</div>
+    <div><strong class="text-slate-700">Statistiche combinate:</strong> modalita "together only": considera solo le partite in cui tutti i selezionati giocano insieme nella stessa squadra.</div>
+  </div>
+
+  <div class="mt-3 flex gap-2">
+    <button type="submit" class="flex-1 bg-slate-900 text-white rounded px-3 py-1 text-sm font-semibold">Applica</button>
+    <button type="button" id="resetAllBtn" class="flex-1 border rounded px-3 py-1 text-sm font-semibold">Reset</button>
+  </div>
+</form>
+
+{% if group_active %}
+<section class="bg-white rounded-xl p-4 shadow mt-4">
+  <h2 class="font-semibold">Statistiche Combinate</h2>
+  {% if combined_stats and combo_selected_players %}
+  <div class="text-sm mb-3">
+    Gruppo:
+    <strong class="text-blue-700">{{ player.name }}</strong>
+    {% for cp in combo_selected_players %}
+    + <strong class="{{ compare_palette[loop.index0].text_class }}">{{ cp.name }}</strong>
+    {% endfor %}
+  </div>
+  {% if group_error %}
+  <div class="bg-amber-50 border border-amber-300 rounded p-2 text-sm text-amber-800 mb-3">{{ group_error }}</div>
+  {% else %}
+  <div class="grid grid-cols-2 gap-2 mb-3 text-sm">
+    <div class="border rounded p-2">Partite insieme: <strong>{{ combined_stats.matches }}</strong></div>
+    <div class="border rounded p-2">W/D/L: <strong>{{ combined_stats.wins }}/{{ combined_stats.draws }}/{{ combined_stats.losses }}</strong></div>
+    <div class="border rounded p-2">Win rate: <strong>{{ "%.1f"|format(combined_stats.win_rate) }}%</strong></div>
+    <div class="border rounded p-2">Goal gruppo: <strong>{{ combined_stats.group_goals }}</strong></div>
+    <div class="border rounded p-2">Assist gruppo: <strong>{{ combined_stats.group_assists }}</strong></div>
+    <div class="border rounded p-2">GF/GA squadra: <strong>{{ combined_stats.team_goals_for }}/{{ combined_stats.team_goals_against }}</strong></div>
+    <div class="border rounded p-2 col-span-2">Diff reti media: <strong>{{ "%.2f"|format(combined_stats.avg_goal_diff) }}</strong></div>
+  </div>
+
+  <h3 class="font-medium text-sm mb-2">On/Off {{ player.name }}</h3>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm border">
+      <thead class="bg-slate-50">
+        <tr>
+          <th class="border p-2 text-left">Split</th>
+          <th class="border p-2 text-right">M</th>
+          <th class="border p-2 text-right">W</th>
+          <th class="border p-2 text-right">D</th>
+          <th class="border p-2 text-right">L</th>
+          <th class="border p-2 text-right">Win %</th>
+          <th class="border p-2 text-right">GF/GA</th>
+          <th class="border p-2 text-right">G/A {{ player.name }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="border p-2">Con gruppo</td>
+          <td class="border p-2 text-right">{{ on_off_stats.with_group.matches }}</td>
+          <td class="border p-2 text-right">{{ on_off_stats.with_group.wins }}</td>
+          <td class="border p-2 text-right">{{ on_off_stats.with_group.draws }}</td>
+          <td class="border p-2 text-right">{{ on_off_stats.with_group.losses }}</td>
+          <td class="border p-2 text-right">{{ "%.1f"|format(on_off_stats.with_group.win_rate) }}%</td>
+          <td class="border p-2 text-right">{{ on_off_stats.with_group.goals_for }}/{{ on_off_stats.with_group.goals_against }}</td>
+          <td class="border p-2 text-right">{{ on_off_stats.with_group.primary_goals }}/{{ on_off_stats.with_group.primary_assists }}</td>
+        </tr>
+        <tr>
+          <td class="border p-2">Senza gruppo</td>
+          <td class="border p-2 text-right">{{ on_off_stats.without_group.matches }}</td>
+          <td class="border p-2 text-right">{{ on_off_stats.without_group.wins }}</td>
+          <td class="border p-2 text-right">{{ on_off_stats.without_group.draws }}</td>
+          <td class="border p-2 text-right">{{ on_off_stats.without_group.losses }}</td>
+          <td class="border p-2 text-right">{{ "%.1f"|format(on_off_stats.without_group.win_rate) }}%</td>
+          <td class="border p-2 text-right">{{ on_off_stats.without_group.goals_for }}/{{ on_off_stats.without_group.goals_against }}</td>
+          <td class="border p-2 text-right">{{ on_off_stats.without_group.primary_goals }}/{{ on_off_stats.without_group.primary_assists }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% endif %}
+</section>
+{% endif %}
+
 <section id="player-matches" class="bg-white rounded-xl p-4 shadow mt-4 hidden">
-  <h2 class="font-semibold mb-3">Matches Played</h2>
+  <h2 class="font-semibold mb-3">Matches</h2>
+  {% if compare_active %}
+  <div class="mb-4">
+    <h3 class="font-medium text-sm text-slate-700 mb-2">Partite con tutti i selezionati</h3>
+    <ul class="space-y-3">
+      {% for m in shared_matches %}
+      <li class="border rounded p-3">
+        <a href="/matches/{{ m.match_id }}" class="font-semibold underline">{{ m.date }}</a>
+        <div class="text-sm mt-1">Score: {{ m.goals_a }} - {{ m.goals_b }} ({{ m.winner }})</div>
+        <div class="text-xs text-slate-600 mt-1">A: {{ m.team_a_players|join(', ') }}</div>
+        <div class="text-xs text-slate-600">B: {{ m.team_b_players|join(', ') }}</div>
+      </li>
+      {% else %}
+      <li class="border rounded p-3 text-sm">Nessuna partita con tutti i selezionati.</li>
+      {% endfor %}
+    </ul>
+  </div>
+  <div class="mb-4">
+    <h3 class="font-medium text-sm text-blue-700 mb-2">Partite solo {{ player.name }}</h3>
+    <ul class="space-y-3">
+      {% for m in primary_only_matches %}
+      <li class="border rounded p-3">
+        <a href="/matches/{{ m.match_id }}" class="font-semibold underline">{{ m.date }}</a>
+        <div class="text-sm mt-1">Score: {{ m.goals_a }} - {{ m.goals_b }} ({{ m.winner }})</div>
+        <div class="text-xs text-slate-600 mt-1">A: {{ m.team_a_players|join(', ') }}</div>
+        <div class="text-xs text-slate-600">B: {{ m.team_b_players|join(', ') }}</div>
+      </li>
+      {% else %}
+      <li class="border rounded p-3 text-sm">Nessuna partita solo {{ player.name }}.</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% for cp in compare_selected_players %}
+  {% set cp_matches = compare_only_matches.get(cp.name, []) %}
+  <div class="mb-4">
+    <h3 class="font-medium text-sm {{ compare_palette[loop.index0].text_class }} mb-2">Partite solo {{ cp.name }}</h3>
+    <ul class="space-y-3">
+      {% for m in cp_matches %}
+      <li class="border rounded p-3">
+        <a href="/matches/{{ m.match_id }}" class="font-semibold underline">{{ m.date }}</a>
+        <div class="text-sm mt-1">Score: {{ m.goals_a }} - {{ m.goals_b }} ({{ m.winner }})</div>
+        <div class="text-xs text-slate-600 mt-1">A: {{ m.team_a_players|join(', ') }}</div>
+        <div class="text-xs text-slate-600">B: {{ m.team_b_players|join(', ') }}</div>
+      </li>
+      {% else %}
+      <li class="border rounded p-3 text-sm">Nessuna partita solo {{ cp.name }}.</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endfor %}
+  {% else %}
   <ul class="space-y-3">
-    {% for m in player_matches %}
+    {% for m in primary_only_matches %}
     <li class="border rounded p-3">
       <a href="/matches/{{ m.match_id }}" class="font-semibold underline">{{ m.date }}</a>
       <div class="text-sm mt-1">Score: {{ m.goals_a }} - {{ m.goals_b }} ({{ m.winner }})</div>
@@ -36,38 +289,63 @@
     <li class="border rounded p-3 text-sm">No matches for this player.</li>
     {% endfor %}
   </ul>
+  {% endif %}
 </section>
+
 <script>
 const labels = {{ timeline_labels | safe }};
 const series = {{ timeline_series | safe }};
+const primaryName = {{ player.name | tojson }};
+const compareNames = {{ compare_selected_players | map(attribute='name') | list | tojson }};
+const palette = {{ compare_palette | tojson }};
+const baseColors = [
+  { hex: '#2563eb', fill: 'rgba(37, 99, 235, 0.12)' },
+  { hex: palette[0].hex, fill: 'rgba(220, 38, 38, 0.12)' },
+  { hex: palette[1].hex, fill: 'rgba(22, 163, 74, 0.12)' },
+  { hex: palette[2].hex, fill: 'rgba(245, 158, 11, 0.14)' },
+];
+const playerOrder = [primaryName, ...compareNames];
+
 const ctx = document.getElementById('eloChart');
 const title = document.getElementById('metricTitle');
 const metricCards = Array.from(document.querySelectorAll('.metric-card'));
 const matchesBtn = document.querySelector('.stat-open-matches');
 const matchesSection = document.getElementById('player-matches');
 
+function metricRange(allSeries) {
+  const values = allSeries.flat().filter((v) => Number.isFinite(v));
+  if (!values.length) return { min: 0, max: 1 };
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min;
+  const pad = span > 0 ? span * 0.15 : Math.max(Math.abs(max) * 0.05, 1);
+  return { min: Math.max(0, min - pad), max: max + pad };
+}
+
 const chart = new Chart(ctx, {
   type: 'line',
   data: {
     labels,
-    datasets: [{
-      label: 'ELO',
-      data: series.elo.values,
-      borderColor: '#2563eb',
-      backgroundColor: 'rgba(37, 99, 235, 0.15)',
+    datasets: playerOrder.map((name, idx) => ({
+      label: name,
+      data: series.elo.values_by_player[name] || [],
+      borderColor: baseColors[idx].hex,
+      backgroundColor: baseColors[idx].fill,
       tension: 0.25,
+      spanGaps: true,
       fill: true,
-    }]
+    })),
   },
   options: {
-    scales: { y: { beginAtZero: true } },
-    plugins: { legend: { display: true } }
-  }
+    scales: { y: { beginAtZero: false } },
+    plugins: { legend: { display: true } },
+  },
 });
 
 function setActiveMetric(metric) {
   metricCards.forEach((card) => {
     const isActive = card.dataset.metric === metric;
+    card.classList.toggle('metric-card-active', isActive);
     card.classList.toggle('bg-blue-600', isActive);
     card.classList.toggle('text-white', isActive);
     card.classList.toggle('hover:bg-blue-500', isActive);
@@ -78,8 +356,16 @@ function setActiveMetric(metric) {
 function setMetric(metric) {
   const metricData = series[metric];
   if (!metricData) return;
-  chart.data.datasets[0].label = metricData.label;
-  chart.data.datasets[0].data = metricData.values;
+  const allValues = [];
+  chart.data.datasets.forEach((dataset, idx) => {
+    const playerName = playerOrder[idx];
+    const values = metricData.values_by_player[playerName] || [];
+    dataset.data = values;
+    allValues.push(values);
+  });
+  const range = metricRange(allValues);
+  chart.options.scales.y.min = range.min;
+  chart.options.scales.y.max = range.max;
   chart.update();
   title.textContent = `${metricData.label} Over Time`;
   setActiveMetric(metric);
@@ -96,6 +382,135 @@ matchesBtn.addEventListener('click', () => {
   }
 });
 
+const form = document.getElementById('controlForm');
+const compareBox = document.getElementById('compareBox');
+const groupBox = document.getElementById('groupBox');
+const addCompareBtn = document.getElementById('addCompareBtn');
+const clearCompareBtn = document.getElementById('clearCompareBtn');
+const clearGroupBtn = document.getElementById('clearGroupBtn');
+const resetAllBtn = document.getElementById('resetAllBtn');
+const comboSizeSelect = document.getElementById('combo_size');
+const compareRows = Array.from(document.querySelectorAll('.compare-row'));
+const compareSelects = Array.from(document.querySelectorAll('.compare-select'));
+const groupRows = Array.from(document.querySelectorAll('.group-row'));
+const groupSelects = Array.from(document.querySelectorAll('.combo-partner'));
+
+function selectedCount(selects) {
+  return selects.filter((s) => !!s.value).length;
+}
+
+function updateCompareRowsVisibility() {
+  const selected = selectedCount(compareSelects);
+  let visible = Math.max(1, selected + 1);
+  visible = Math.min(3, visible);
+  compareRows.forEach((row, idx) => {
+    row.classList.toggle('hidden', idx >= visible);
+  });
+}
+
+function updateGroupRowsVisibility() {
+  const needed = Math.max(1, Number(comboSizeSelect.value) - 1);
+  groupRows.forEach((row, idx) => {
+    row.classList.toggle('hidden', idx >= needed);
+  });
+}
+
+function enforceExclusiveMode() {
+  const hasCompare = selectedCount(compareSelects) > 0;
+  const hasGroup = selectedCount(groupSelects) > 0;
+
+  const disableGroup = hasCompare;
+  groupBox.classList.toggle('opacity-50', disableGroup);
+  comboSizeSelect.disabled = disableGroup;
+  groupSelects.forEach((s) => { s.disabled = disableGroup || s.closest('.group-row').classList.contains('hidden'); });
+  groupBox.querySelectorAll('button').forEach((btn) => { btn.disabled = disableGroup; });
+
+  const disableCompare = hasGroup;
+  compareBox.classList.toggle('opacity-50', disableCompare);
+  compareSelects.forEach((s) => { s.disabled = disableCompare || s.closest('.compare-row').classList.contains('hidden'); });
+  compareBox.querySelectorAll('button').forEach((btn) => { btn.disabled = disableCompare; });
+
+  if (!disableCompare) addCompareBtn.disabled = selectedCount(compareSelects) >= 3;
+}
+
+function sanitizeAndSubmit() {
+  compareSelects.forEach((s) => {
+    if (!s.value || s.disabled || s.closest('.compare-row').classList.contains('hidden')) {
+      s.dataset.origName = s.name;
+      s.removeAttribute('name');
+    }
+  });
+  groupSelects.forEach((s) => {
+    if (!s.value || s.disabled || s.closest('.group-row').classList.contains('hidden')) {
+      s.dataset.origName = s.name;
+      s.removeAttribute('name');
+    }
+  });
+  if (comboSizeSelect.disabled) {
+    comboSizeSelect.dataset.origName = comboSizeSelect.name;
+    comboSizeSelect.removeAttribute('name');
+  }
+  form.submit();
+}
+
+addCompareBtn?.addEventListener('click', () => {
+  const hiddenRow = compareRows.find((r) => r.classList.contains('hidden'));
+  if (hiddenRow) {
+    hiddenRow.classList.remove('hidden');
+    hiddenRow.querySelector('select')?.focus();
+  }
+  enforceExclusiveMode();
+});
+
+compareRows.forEach((row) => {
+  row.querySelector('.remove-compare')?.addEventListener('click', () => {
+    const sel = row.querySelector('select');
+    if (sel) sel.value = '';
+    sanitizeAndSubmit();
+  });
+});
+
+groupRows.forEach((row) => {
+  row.querySelector('.remove-group')?.addEventListener('click', () => {
+    const sel = row.querySelector('select');
+    if (sel) sel.value = '';
+    sanitizeAndSubmit();
+  });
+});
+
+clearCompareBtn?.addEventListener('click', () => {
+  compareSelects.forEach((s) => { s.value = ''; });
+  sanitizeAndSubmit();
+});
+
+clearGroupBtn?.addEventListener('click', () => {
+  groupSelects.forEach((s) => { s.value = ''; });
+  comboSizeSelect.value = '2';
+  sanitizeAndSubmit();
+});
+
+resetAllBtn?.addEventListener('click', () => {
+  window.location.href = window.location.pathname;
+});
+
+form.addEventListener('submit', (event) => {
+  event.preventDefault();
+  sanitizeAndSubmit();
+});
+
+[...compareSelects, ...groupSelects].forEach((s) => s.addEventListener('change', () => {
+  updateCompareRowsVisibility();
+  updateGroupRowsVisibility();
+  enforceExclusiveMode();
+}));
+comboSizeSelect?.addEventListener('change', () => {
+  updateGroupRowsVisibility();
+  enforceExclusiveMode();
+});
+
+updateCompareRowsVisibility();
+updateGroupRowsVisibility();
+enforceExclusiveMode();
 setMetric('elo');
 </script>
 {% endblock %}

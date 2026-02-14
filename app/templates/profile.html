@@ -3,24 +3,38 @@
 {% block content %}
 <div class="flex items-center justify-between mb-3">
   <h1 class="text-xl font-bold">My Profile</h1>
-  <a href="/players/{{ player.id }}" class="text-sm underline">Open full player page</a>
+  <div class="flex items-center gap-3">
+    <form method="get" class="flex items-center gap-2">
+      <label for="compare_with" class="text-sm text-slate-700">Compara con</label>
+      <select id="compare_with" name="compare_with" class="border rounded px-2 py-1 text-sm">
+        <option value="">Nessuno</option>
+        {% for candidate in compare_candidates %}
+        <option value="{{ candidate.id }}" {% if compare_player and compare_player.id == candidate.id %}selected{% endif %}>{{ candidate.name }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="bg-slate-900 text-white rounded px-3 py-1 text-sm">Applica</button>
+    </form>
+    <a href="/players/{{ player.id }}" class="text-sm underline">Open full player page</a>
+  </div>
 </div>
 
 <div class="mb-3 text-sm text-slate-600">Logged as <strong>{{ player.name }}</strong></div>
 
 <div class="grid grid-cols-2 gap-2 mb-4 text-sm">
   <button type="button" data-target="player-matches" class="stat-open-matches bg-white rounded p-3 shadow text-left hover:bg-slate-50">
-    Matches: <strong>{{ stats.matches }}</strong>
+    Matches:
+    <strong class="text-blue-700">{{ stats.matches }}</strong>
+    {% if compare_stats %}<span>/</span><strong class="text-red-600">{{ compare_stats.matches }}</strong>{% endif %}
   </button>
-  <button type="button" data-metric="wins" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Wins: <strong>{{ stats.wins }}</strong></button>
-  <button type="button" data-metric="draws" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Draws: <strong>{{ stats.draws }}</strong></button>
-  <button type="button" data-metric="losses" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Losses: <strong>{{ stats.losses }}</strong></button>
-  <button type="button" data-metric="goals_scored" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Goals Scored: <strong>{{ stats.goals_scored }}</strong></button>
-  <button type="button" data-metric="goals_per_match" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Goals/Match: <strong>{{ "%.2f"|format(stats.goals_per_match) }}</strong></button>
-  <button type="button" data-metric="assists" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Assists: <strong>{{ stats.assists }}</strong></button>
-  <button type="button" data-metric="goals_conceded" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Goals Conceded: <strong>{{ stats.goals_conceded }}</strong></button>
-  <button type="button" data-metric="win_rate" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Win Rate: <strong>{{ "%.1f"|format(stats.win_rate * 100) }}%</strong></button>
-  <button type="button" data-metric="elo" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">ELO: <strong>{{ "%.1f"|format(stats.elo_placeholder) }}</strong></button>
+  <button type="button" data-metric="wins" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Wins: <strong class="text-blue-700">{{ stats.wins }}</strong>{% if compare_stats %}<span>/</span><strong class="text-red-600">{{ compare_stats.wins }}</strong>{% endif %}</button>
+  <button type="button" data-metric="draws" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Draws: <strong class="text-blue-700">{{ stats.draws }}</strong>{% if compare_stats %}<span>/</span><strong class="text-red-600">{{ compare_stats.draws }}</strong>{% endif %}</button>
+  <button type="button" data-metric="losses" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Losses: <strong class="text-blue-700">{{ stats.losses }}</strong>{% if compare_stats %}<span>/</span><strong class="text-red-600">{{ compare_stats.losses }}</strong>{% endif %}</button>
+  <button type="button" data-metric="goals_scored" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Goals Scored: <strong class="text-blue-700">{{ stats.goals_scored }}</strong>{% if compare_stats %}<span>/</span><strong class="text-red-600">{{ compare_stats.goals_scored }}</strong>{% endif %}</button>
+  <button type="button" data-metric="goals_per_match" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Goals/Match: <strong class="text-blue-700">{{ "%.2f"|format(stats.goals_per_match) }}</strong>{% if compare_stats %}<span>/</span><strong class="text-red-600">{{ "%.2f"|format(compare_stats.goals_per_match) }}</strong>{% endif %}</button>
+  <button type="button" data-metric="assists" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Assists: <strong class="text-blue-700">{{ stats.assists }}</strong>{% if compare_stats %}<span>/</span><strong class="text-red-600">{{ compare_stats.assists }}</strong>{% endif %}</button>
+  <button type="button" data-metric="goals_conceded" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Goals Conceded: <strong class="text-blue-700">{{ stats.goals_conceded }}</strong>{% if compare_stats %}<span>/</span><strong class="text-red-600">{{ compare_stats.goals_conceded }}</strong>{% endif %}</button>
+  <button type="button" data-metric="win_rate" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">Win Rate: <strong class="text-blue-700">{{ "%.1f"|format(stats.win_rate * 100) }}%</strong>{% if compare_stats %}<span>/</span><strong class="text-red-600">{{ "%.1f"|format(compare_stats.win_rate * 100) }}%</strong>{% endif %}</button>
+  <button type="button" data-metric="elo" class="metric-card bg-white rounded p-3 shadow text-left hover:bg-slate-50">ELO: <strong class="text-blue-700">{{ "%.1f"|format(stats.elo_placeholder) }}</strong>{% if compare_stats %}<span>/</span><strong class="text-red-600">{{ "%.1f"|format(compare_stats.elo_placeholder) }}</strong>{% endif %}</button>
 </div>
 
 <div class="bg-white rounded-xl p-4 shadow">
@@ -29,9 +43,56 @@
 </div>
 
 <section id="player-matches" class="bg-white rounded-xl p-4 shadow mt-4 hidden">
-  <h2 class="font-semibold mb-3">Matches Played</h2>
+  <h2 class="font-semibold mb-3">Matches</h2>
+  {% if compare_player %}
+  <div class="mb-4">
+    <h3 class="font-medium text-sm text-slate-700 mb-2">Partite giocate insieme</h3>
+    <ul class="space-y-3">
+      {% for m in shared_matches %}
+      <li class="border rounded p-3">
+        <a href="/matches/{{ m.match_id }}" class="font-semibold underline">{{ m.date }}</a>
+        <div class="text-sm mt-1">Score: {{ m.goals_a }} - {{ m.goals_b }} ({{ m.winner }})</div>
+        <div class="text-xs text-slate-600 mt-1">A: {{ m.team_a_players|join(', ') }}</div>
+        <div class="text-xs text-slate-600">B: {{ m.team_b_players|join(', ') }}</div>
+      </li>
+      {% else %}
+      <li class="border rounded p-3 text-sm">Nessuna partita insieme.</li>
+      {% endfor %}
+    </ul>
+  </div>
+  <div class="mb-4">
+    <h3 class="font-medium text-sm text-blue-700 mb-2">Partite solo {{ player.name }}</h3>
+    <ul class="space-y-3">
+      {% for m in primary_only_matches %}
+      <li class="border rounded p-3">
+        <a href="/matches/{{ m.match_id }}" class="font-semibold underline">{{ m.date }}</a>
+        <div class="text-sm mt-1">Score: {{ m.goals_a }} - {{ m.goals_b }} ({{ m.winner }})</div>
+        <div class="text-xs text-slate-600 mt-1">A: {{ m.team_a_players|join(', ') }}</div>
+        <div class="text-xs text-slate-600">B: {{ m.team_b_players|join(', ') }}</div>
+      </li>
+      {% else %}
+      <li class="border rounded p-3 text-sm">Nessuna partita solo {{ player.name }}.</li>
+      {% endfor %}
+    </ul>
+  </div>
+  <div>
+    <h3 class="font-medium text-sm text-red-600 mb-2">Partite solo {{ compare_player.name }}</h3>
+    <ul class="space-y-3">
+      {% for m in secondary_only_matches %}
+      <li class="border rounded p-3">
+        <a href="/matches/{{ m.match_id }}" class="font-semibold underline">{{ m.date }}</a>
+        <div class="text-sm mt-1">Score: {{ m.goals_a }} - {{ m.goals_b }} ({{ m.winner }})</div>
+        <div class="text-xs text-slate-600 mt-1">A: {{ m.team_a_players|join(', ') }}</div>
+        <div class="text-xs text-slate-600">B: {{ m.team_b_players|join(', ') }}</div>
+      </li>
+      {% else %}
+      <li class="border rounded p-3 text-sm">Nessuna partita solo {{ compare_player.name }}.</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% else %}
   <ul class="space-y-3">
-    {% for m in player_matches %}
+    {% for m in primary_only_matches %}
     <li class="border rounded p-3">
       <a href="/matches/{{ m.match_id }}" class="font-semibold underline">{{ m.date }}</a>
       <div class="text-sm mt-1">Score: {{ m.goals_a }} - {{ m.goals_b }} ({{ m.winner }})</div>
@@ -42,31 +103,55 @@
     <li class="border rounded p-3 text-sm">No matches for this player.</li>
     {% endfor %}
   </ul>
+  {% endif %}
 </section>
 <script>
 const labels = {{ timeline_labels | safe }};
 const series = {{ timeline_series | safe }};
+const primaryName = {{ player.name | tojson }};
+const compareName = {{ (compare_player.name if compare_player else None) | tojson }};
 const ctx = document.getElementById('profileEloChart');
 const title = document.getElementById('metricTitle');
 const metricCards = Array.from(document.querySelectorAll('.metric-card'));
 const matchesBtn = document.querySelector('.stat-open-matches');
 const matchesSection = document.getElementById('player-matches');
 
+function metricRange(valuesA, valuesB) {
+  const values = [...valuesA, ...valuesB].filter((v) => Number.isFinite(v));
+  if (!values.length) return { min: 0, max: 1 };
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min;
+  const pad = span > 0 ? span * 0.15 : Math.max(Math.abs(max) * 0.05, 1);
+  return { min: Math.max(0, min - pad), max: max + pad };
+}
+
 const chart = new Chart(ctx, {
   type: 'line',
   data: {
     labels,
     datasets: [{
-      label: 'ELO',
-      data: series.elo.values,
+      label: primaryName,
+      data: series.elo.primary_values,
       borderColor: '#2563eb',
-      backgroundColor: 'rgba(37, 99, 235, 0.15)',
+      backgroundColor: 'rgba(37, 99, 235, 0.10)',
       tension: 0.25,
-      fill: true,
-    }]
+      spanGaps: true,
+      fill: false,
+    },
+    {
+      label: compareName || 'Comparison',
+      data: series.elo.secondary_values,
+      borderColor: '#dc2626',
+      backgroundColor: 'rgba(220, 38, 38, 0.10)',
+      tension: 0.25,
+      spanGaps: true,
+      fill: false,
+      hidden: !compareName,
+    }],
   },
   options: {
-    scales: { y: { beginAtZero: true } },
+    scales: { y: { beginAtZero: false } },
     plugins: { legend: { display: true } }
   }
 });
@@ -84,8 +169,14 @@ function setActiveMetric(metric) {
 function setMetric(metric) {
   const metricData = series[metric];
   if (!metricData) return;
-  chart.data.datasets[0].label = metricData.label;
-  chart.data.datasets[0].data = metricData.values;
+  chart.data.datasets[0].label = primaryName;
+  chart.data.datasets[0].data = metricData.primary_values;
+  chart.data.datasets[1].label = compareName || 'Comparison';
+  chart.data.datasets[1].data = metricData.secondary_values;
+  chart.data.datasets[1].hidden = !compareName;
+  const range = metricRange(metricData.primary_values, metricData.secondary_values);
+  chart.options.scales.y.min = range.min;
+  chart.options.scales.y.max = range.max;
   chart.update();
   title.textContent = `${metricData.label} Over Time`;
   setActiveMetric(metric);

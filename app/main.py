@@ -5,7 +5,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -21,7 +21,17 @@ from .data_io import (
     soft_delete_match,
     write_match_excel,
 )
-from .stats import build_dashboard, compute_player_stats, match_to_view, player_cumulative_series, player_matches_views
+from .stats import (
+    build_dashboard,
+    combined_together_stats,
+    compute_player_stats,
+    match_to_view,
+    multi_player_cumulative_series,
+    multi_player_matches_views,
+    player_cumulative_series,
+    player_matches_views,
+    primary_on_off_stats,
+)
 
 app = FastAPI(title="Calcetto App")
 # Session cookie lasts only for the browser session (no multi-day persistence).
@@ -47,6 +57,19 @@ def current_user(request: Request) -> str | None:
 
 def _normalize_name(value: str) -> str:
     return " ".join(value.strip().split()).lower()
+
+
+def _parse_int_query_list(values: list[str]) -> list[int]:
+    parsed: list[int] = []
+    for raw in values:
+        cleaned = str(raw).strip()
+        if not cleaned:
+            continue
+        try:
+            parsed.append(int(cleaned))
+        except ValueError:
+            continue
+    return parsed
 
 
 def _parse_match_note(note: str) -> dict[str, str]:
@@ -98,7 +121,12 @@ def index(request: Request) -> HTMLResponse:
 
 
 @app.get("/profile", response_class=HTMLResponse)
-def profile_page(request: Request) -> HTMLResponse:
+def profile_page(
+    request: Request,
+    compare_with: list[str] = Query(default=[]),
+    combo_size: int = 2,
+    combo_with: list[str] = Query(default=[]),
+) -> HTMLResponse:
     redirect = require_user(request)
     if redirect:
         return redirect
@@ -113,12 +141,72 @@ def profile_page(request: Request) -> HTMLResponse:
 
     stats_map = compute_player_stats(bundle.matches, [p.name for p in bundle.players])
     pstats = stats_map[player.name]
-    timeline_labels, timeline_series = player_cumulative_series(bundle.matches, player.name)
-    player_matches = player_matches_views(bundle.matches, player.name)
+    player_matches = player_matches_views(bundle.matches, player.name)  # Fallback for default view.
+    compare_candidates = [p for p in bundle.players if p.id != player.id]
+    candidates_by_id = {p.id: p for p in compare_candidates}
+
+    compare_selected_ids: list[int] = []
+    for cid in _parse_int_query_list(compare_with):
+        if cid == player.id or cid in compare_selected_ids or cid not in candidates_by_id:
+            continue
+        compare_selected_ids.append(cid)
+    compare_selected_ids = compare_selected_ids[:3]
+    compare_selected_players = [candidates_by_id[cid] for cid in compare_selected_ids]
+    compare_stats_list = [stats_map[p.name] for p in compare_selected_players]
+
+    normalized_combo_size = combo_size if combo_size in {2, 3, 4} else 2
+    needed_partners = normalized_combo_size - 1
+    combo_selected_ids: list[int] = []
+    for cid in _parse_int_query_list(combo_with):
+        if cid == player.id or cid in combo_selected_ids or cid not in candidates_by_id:
+            continue
+        combo_selected_ids.append(cid)
+    combo_selected_ids = combo_selected_ids[:needed_partners]
+    combo_selected_players = [candidates_by_id[cid] for cid in combo_selected_ids]
+
+    compare_active = len(compare_selected_players) > 0
+    group_active = (len(combo_selected_players) > 0) and not compare_active
+
+    combined_stats = None
+    on_off_stats = None
+    group_error: str | None = None
+    compare_warnings: list[str] = []
+    if group_active and len(combo_selected_players) == needed_partners:
+        combined_names = [player.name] + [p.name for p in combo_selected_players]
+        combined_stats = combined_together_stats(bundle.matches, combined_names)
+        on_off_stats = primary_on_off_stats(bundle.matches, player.name, [p.name for p in combo_selected_players])
+        if int(combined_stats["matches"]) == 0:
+            group_error = "Nessuna partita in comune tra tutti i giocatori selezionati."
+    elif compare_active:
+        combo_selected_ids = []
+        combo_selected_players = []
+
+    if compare_active:
+        timeline_labels, timeline_series = multi_player_cumulative_series(
+            bundle.matches, [player.name] + [p.name for p in compare_selected_players]
+        )
+        shared_matches, primary_only_matches, compare_only_matches = multi_player_matches_views(
+            bundle.matches, player.name, [p.name for p in compare_selected_players]
+        )
+        for p in compare_selected_players:
+            if stats_map[p.name].matches == 0:
+                compare_warnings.append(f"{p.name} non ha ancora partite registrate.")
+    else:
+        timeline_labels, single_series = player_cumulative_series(bundle.matches, player.name)
+        timeline_series = {
+            metric: {
+                "label": metric_data["label"],
+                "values_by_player": {player.name: metric_data["values"]},
+            }
+            for metric, metric_data in single_series.items()
+        }
+        shared_matches = []
+        primary_only_matches = player_matches
+        compare_only_matches = {}
 
     return render_page(
         request,
-        "profile.html",
+        "player_detail.html",
         bundle,
         {
             "player": player,
@@ -126,6 +214,27 @@ def profile_page(request: Request) -> HTMLResponse:
             "timeline_labels": json.dumps(timeline_labels),
             "timeline_series": json.dumps(timeline_series),
             "player_matches": player_matches,
+            "compare_candidates": compare_candidates,
+            "compare_selected_ids": compare_selected_ids,
+            "compare_selected_players": compare_selected_players,
+            "compare_stats_list": compare_stats_list,
+            "shared_matches": shared_matches,
+            "primary_only_matches": primary_only_matches,
+            "compare_only_matches": compare_only_matches,
+            "combo_size": normalized_combo_size,
+            "combo_selected_ids": combo_selected_ids,
+            "combo_selected_players": combo_selected_players,
+            "combined_stats": combined_stats,
+            "on_off_stats": on_off_stats,
+            "compare_active": compare_active,
+            "group_active": group_active,
+            "group_error": group_error,
+            "compare_warnings": compare_warnings,
+            "compare_palette": [
+                {"hex": "#dc2626", "text_class": "text-red-600"},
+                {"hex": "#16a34a", "text_class": "text-green-600"},
+                {"hex": "#f59e0b", "text_class": "text-amber-500"},
+            ],
         },
     )
 
@@ -190,7 +299,13 @@ def players_new_submit(request: Request, name: str = Form(...)) -> HTMLResponse:
 
 
 @app.get("/players/{player_id}", response_class=HTMLResponse)
-def player_detail(request: Request, player_id: int) -> HTMLResponse:
+def player_detail(
+    request: Request,
+    player_id: int,
+    compare_with: list[str] = Query(default=[]),
+    combo_size: int = 2,
+    combo_with: list[str] = Query(default=[]),
+) -> HTMLResponse:
     redirect = require_user(request)
     if redirect:
         return redirect
@@ -202,8 +317,68 @@ def player_detail(request: Request, player_id: int) -> HTMLResponse:
 
     stats_map = compute_player_stats(bundle.matches, [p.name for p in bundle.players])
     pstats = stats_map[player.name]
-    timeline_labels, timeline_series = player_cumulative_series(bundle.matches, player.name)
-    player_matches = player_matches_views(bundle.matches, player.name)
+    player_matches = player_matches_views(bundle.matches, player.name)  # Fallback for default view.
+    compare_candidates = [p for p in bundle.players if p.id != player.id]
+    candidates_by_id = {p.id: p for p in compare_candidates}
+
+    compare_selected_ids: list[int] = []
+    for cid in _parse_int_query_list(compare_with):
+        if cid == player.id or cid in compare_selected_ids or cid not in candidates_by_id:
+            continue
+        compare_selected_ids.append(cid)
+    compare_selected_ids = compare_selected_ids[:3]
+    compare_selected_players = [candidates_by_id[cid] for cid in compare_selected_ids]
+    compare_stats_list = [stats_map[p.name] for p in compare_selected_players]
+
+    normalized_combo_size = combo_size if combo_size in {2, 3, 4} else 2
+    needed_partners = normalized_combo_size - 1
+    combo_selected_ids: list[int] = []
+    for cid in _parse_int_query_list(combo_with):
+        if cid == player.id or cid in combo_selected_ids or cid not in candidates_by_id:
+            continue
+        combo_selected_ids.append(cid)
+    combo_selected_ids = combo_selected_ids[:needed_partners]
+    combo_selected_players = [candidates_by_id[cid] for cid in combo_selected_ids]
+
+    compare_active = len(compare_selected_players) > 0
+    group_active = (len(combo_selected_players) > 0) and not compare_active
+
+    combined_stats = None
+    on_off_stats = None
+    group_error: str | None = None
+    compare_warnings: list[str] = []
+    if group_active and len(combo_selected_players) == needed_partners:
+        combined_names = [player.name] + [p.name for p in combo_selected_players]
+        combined_stats = combined_together_stats(bundle.matches, combined_names)
+        on_off_stats = primary_on_off_stats(bundle.matches, player.name, [p.name for p in combo_selected_players])
+        if int(combined_stats["matches"]) == 0:
+            group_error = "Nessuna partita in comune tra tutti i giocatori selezionati."
+    elif compare_active:
+        combo_selected_ids = []
+        combo_selected_players = []
+
+    if compare_active:
+        timeline_labels, timeline_series = multi_player_cumulative_series(
+            bundle.matches, [player.name] + [p.name for p in compare_selected_players]
+        )
+        shared_matches, primary_only_matches, compare_only_matches = multi_player_matches_views(
+            bundle.matches, player.name, [p.name for p in compare_selected_players]
+        )
+        for p in compare_selected_players:
+            if stats_map[p.name].matches == 0:
+                compare_warnings.append(f"{p.name} non ha ancora partite registrate.")
+    else:
+        timeline_labels, single_series = player_cumulative_series(bundle.matches, player.name)
+        timeline_series = {
+            metric: {
+                "label": metric_data["label"],
+                "values_by_player": {player.name: metric_data["values"]},
+            }
+            for metric, metric_data in single_series.items()
+        }
+        shared_matches = []
+        primary_only_matches = player_matches
+        compare_only_matches = {}
 
     return render_page(
         request,
@@ -215,6 +390,27 @@ def player_detail(request: Request, player_id: int) -> HTMLResponse:
             "timeline_labels": json.dumps(timeline_labels),
             "timeline_series": json.dumps(timeline_series),
             "player_matches": player_matches,
+            "compare_candidates": compare_candidates,
+            "compare_selected_ids": compare_selected_ids,
+            "compare_selected_players": compare_selected_players,
+            "compare_stats_list": compare_stats_list,
+            "shared_matches": shared_matches,
+            "primary_only_matches": primary_only_matches,
+            "compare_only_matches": compare_only_matches,
+            "combo_size": normalized_combo_size,
+            "combo_selected_ids": combo_selected_ids,
+            "combo_selected_players": combo_selected_players,
+            "combined_stats": combined_stats,
+            "on_off_stats": on_off_stats,
+            "compare_active": compare_active,
+            "group_active": group_active,
+            "group_error": group_error,
+            "compare_warnings": compare_warnings,
+            "compare_palette": [
+                {"hex": "#dc2626", "text_class": "text-red-600"},
+                {"hex": "#16a34a", "text_class": "text-green-600"},
+                {"hex": "#f59e0b", "text_class": "text-amber-500"},
+            ],
         },
     )
 
