@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -40,7 +41,27 @@ app.add_middleware(SessionMiddleware, secret_key="dev-secret-calcetto", max_age=
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-templates = Jinja2Templates(directory="app/templates")
+templates = Jinja2Templates(directory="app/templates_legacy")
+
+# React SPA index
+SPA_INDEX = Path(__file__).resolve().parent / "templates" / "spa.html"
+
+# Season 2 starts after this date
+SEASON2_START = date(2025, 5, 1)
+
+
+def _extract_mvp_name(note: str) -> str:
+    """Extract MVP surname/name from match note."""
+    if not note:
+        return ""
+    m = re.search(r'mvp=([^;]+)', note, re.IGNORECASE)
+    return m.group(1).strip() if m else ""
+
+
+def _month_label(d: date) -> str:
+    months = ["Gen", "Feb", "Mar", "Apr", "Mag", "Giu",
+               "Lug", "Ago", "Set", "Ott", "Nov", "Dic"]
+    return f"{months[d.month - 1]}'{str(d.year)[2:]}"
 
 
 @app.on_event("startup")
@@ -109,15 +130,207 @@ def render_page(request: Request, template: str, bundle: DataBundle, extra: dict
     return templates.TemplateResponse(template, context)
 
 
+# ─────────────────────────────────────────────
+# ROOT — serve the React SPA
+# ─────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request) -> HTMLResponse:
+    if SPA_INDEX.exists():
+        return FileResponse(str(SPA_INDEX), media_type="text/html")
+    # Fallback to legacy dashboard if SPA not built yet
     redirect = require_user(request)
     if redirect:
         return redirect
-
     bundle = load_bundle()
     dashboard = build_dashboard(matches=bundle.matches, player_names=[p.name for p in bundle.players])
     return render_page(request, "index.html", bundle, {"dashboard": dashboard})
+
+
+# ─────────────────────────────────────────────
+# JSON API — Auth
+# ─────────────────────────────────────────────
+@app.get("/api/me")
+def api_me(request: Request) -> JSONResponse:
+    user = current_user(request)
+    return JSONResponse({"user": user})
+
+
+@app.post("/api/login")
+async def api_login(request: Request) -> JSONResponse:
+    body = await request.json()
+    player_name = str(body.get("player_name", "")).strip()
+    bundle = load_bundle()
+    valid_names = {p.name for p in bundle.players}
+    if player_name not in valid_names:
+        return JSONResponse({"error": "Invalid player name"}, status_code=400)
+    request.session["user"] = player_name
+    return JSONResponse({"user": player_name})
+
+
+@app.post("/api/logout")
+def api_logout(request: Request) -> JSONResponse:
+    request.session.clear()
+    return JSONResponse({"ok": True})
+
+
+# ─────────────────────────────────────────────
+# JSON API — Players
+# ─────────────────────────────────────────────
+@app.get("/api/players")
+def api_players(request: Request) -> JSONResponse:
+    bundle = load_bundle()
+    stats_map = compute_player_stats(bundle.matches, [p.name for p in bundle.players])
+
+    # Build per-player MVP count and autogol from match data
+    mvp_counts: dict[str, int] = {}
+    autogol_counts: dict[str, int] = {}
+    for match in bundle.matches:
+        mvp_name = _extract_mvp_name(match.note)
+        if mvp_name:
+            mvp_counts[mvp_name] = mvp_counts.get(mvp_name, 0) + 1
+        # autogol: players whose individual goals < 0 (not currently tracked)
+        # We leave autogol as 0 unless the data records them
+
+    result = []
+    for player in bundle.players:
+        s = stats_map.get(player.name)
+        if not s:
+            continue
+        name_parts = player.name.strip().split()
+        cognome = name_parts[-1] if name_parts else player.name
+        nome = " ".join(name_parts[:-1]) if len(name_parts) > 1 else ""
+        wins = s.wins
+        partite = s.matches
+        vittorie_pct = round((wins / partite * 100) if partite > 0 else 0)
+        gol = s.goals_scored
+        assist = s.assists
+        ga = gol + assist
+        gol_pp = round(gol / partite, 2) if partite > 0 else 0
+        assist_pp = round(assist / partite, 2) if partite > 0 else 0
+        ga_pp = round(ga / partite, 2) if partite > 0 else 0
+        mvp = mvp_counts.get(player.name, 0)
+        result.append({
+            "id": str(player.id),
+            "name": player.name,
+            "cognome": cognome,
+            "nome": nome,
+            "partite": partite,
+            "vittorie": wins,
+            "vittorie_pct": vittorie_pct,
+            "gol": gol,
+            "gol_pp": gol_pp,
+            "assist": assist,
+            "assist_pp": assist_pp,
+            "ga": ga,
+            "ga_pp": ga_pp,
+            "mvp": mvp,
+            "intonso": 0,   # not tracked at match level currently
+            "autogol": autogol_counts.get(player.name, 0),
+            "elo": round(s.elo_rating, 1),
+        })
+    return JSONResponse(result)
+
+
+# ─────────────────────────────────────────────
+# JSON API — Matches
+# ─────────────────────────────────────────────
+@app.get("/api/matches")
+def api_matches(request: Request) -> JSONResponse:
+    bundle = load_bundle()
+    result = []
+    for match in reversed(bundle.matches):  # chronological order
+        mvp = _extract_mvp_name(match.note)
+        gol = match.goals_a + match.goals_b
+        assist_total = sum(r.assists for r in match.players)
+        # autogol not currently stored separately
+        season = 2 if match.date >= SEASON2_START else 1
+        result.append({
+            "match_id": match.match_id,
+            "d": match.date.strftime("%d/%m/%y"),
+            "label": _month_label(match.date),
+            "mvp": mvp,
+            "gol": gol,
+            "assist": assist_total,
+            "autogol": 0,
+            "season": season,
+            "goals_a": match.goals_a,
+            "goals_b": match.goals_b,
+            "winner": match.winner,
+            "team_a": [{"player": r.player, "goals": r.goals, "assists": r.assists} for r in match.team_a],
+            "team_b": [{"player": r.player, "goals": r.goals, "assists": r.assists} for r in match.team_b],
+        })
+    return JSONResponse(result)
+
+
+@app.post("/api/matches")
+async def api_matches_submit(request: Request) -> JSONResponse:
+    user = current_user(request)
+    if not user:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    body = await request.json()
+    bundle = load_bundle()
+    valid_names = {p.name for p in bundle.players}
+    valid_names_normalized = {_normalize_name(n) for n in valid_names}
+
+    date_str = str(body.get("date", "")).strip()
+    if not date_str:
+        return JSONResponse({"error": "Date is required"}, status_code=400)
+    try:
+        match_date = date.fromisoformat(date_str)
+    except ValueError:
+        return JSONResponse({"error": "Date must be in YYYY-MM-DD format"}, status_code=400)
+
+    note = str(body.get("note", "")).strip()
+    mvp_val = str(body.get("mvp", "")).strip()
+    if mvp_val:
+        if note:
+            note += f";mvp={mvp_val}"
+        else:
+            note = f"mvp={mvp_val}"
+
+    rows_raw = body.get("players", [])
+    if not isinstance(rows_raw, list) or len(rows_raw) != 10:
+        return JSONResponse({"error": "Exactly 10 player rows required"}, status_code=400)
+
+    new_players: list[str] = []
+    rows: list[MatchPlayerRow] = []
+    seen: set[str] = set()
+    for row in rows_raw:
+        team = str(row.get("team", "")).strip().upper()
+        player = str(row.get("player", "")).strip()
+        goals_raw = row.get("goals", 0)
+        assists_raw = row.get("assists", 0)
+        if team not in {"A", "B"}:
+            return JSONResponse({"error": f"Invalid team '{team}'"}, status_code=400)
+        if not player:
+            return JSONResponse({"error": "Player name is required"}, status_code=400)
+        norm = _normalize_name(player)
+        if norm in seen:
+            return JSONResponse({"error": f"Duplicate player: {player}"}, status_code=400)
+        seen.add(norm)
+        if norm not in valid_names_normalized:
+            new_players.append(player)
+        try:
+            goals = int(goals_raw)
+            assists = int(assists_raw)
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "Goals and assists must be integers"}, status_code=400)
+        if goals < 0 or assists < 0:
+            return JSONResponse({"error": "Goals/assists must be >= 0"}, status_code=400)
+        rows.append(MatchPlayerRow(team=team, player=player, goals=goals, assists=assists))
+
+    for name in new_players:
+        try:
+            add_player(name)
+        except ValueError:
+            pass  # already exists
+
+    try:
+        match_id = write_match_excel(match_date=match_date, note=note, rows=rows)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+    return JSONResponse({"match_id": match_id})
 
 
 @app.get("/profile", response_class=HTMLResponse)
