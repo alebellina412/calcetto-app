@@ -452,10 +452,9 @@ def profile_page(
     )
 
 
-@app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request) -> HTMLResponse:
-    bundle = load_bundle()
-    return render_page(request, "login.html", bundle, {"players": bundle.players, "error": None})
+@app.get("/login")
+def login_page(request: Request):
+    return RedirectResponse(url="/", status_code=303)
 
 
 @app.post("/login", response_class=HTMLResponse)

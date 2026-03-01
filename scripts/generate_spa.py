@@ -122,6 +122,21 @@ export default function App() {
   const [page,    setPage]    = useState("dash");
   const [detail,  setDetail]  = useState(null);
   const [user,    setUser]    = useState(undefined); // undefined = loading
+  const [rechartsReady, setRechartsReady] = useState(!!window.Recharts);
+
+  // Poll for Recharts if not available yet
+  useEffect(() => {
+    if (rechartsReady) return;
+    const interval = setInterval(() => {
+      console.log("Polling for Recharts...");
+      if (window.Recharts) {
+        console.log("Recharts FOUND!");
+        setRechartsReady(true);
+        clearInterval(interval);
+      }
+    }, 500);
+    return () => clearInterval(interval);
+  }, [rechartsReady]);
 
   // Auth check on mount
   useEffect(() => {
@@ -252,11 +267,27 @@ jsx = jsx.replace("export default function App()", "function App()")
 
 # ── 13. Inject Recharts safely into Dashboard ───────────────────────────────
 # This prevents Error #130 by resolving components at render time.
-DASH_RECH_INJECT = """function Dashboard({ enriched, matches, photos, navigate }) {
-  if (!window.Recharts) return <div className="page glass" style={{padding:40, textAlign:"center"}}>Caricamento grafici...</div>;
+DASH_RECH_INJECT = """function Dashboard({ enriched, matches, photos, navigate, rechartsReady }) {
+  console.log("Dashboard Render: ready=" + rechartsReady + " window.Recharts=" + !!window.Recharts);
+  if (!rechartsReady || !window.Recharts) {
+    return (
+      <div className="page glass" style={{padding:40, textAlign:"center"}}>
+        <div>Caricamento grafici...</div>
+        <div style={{fontSize:10, color:C.t3, marginTop:10}}>
+          Ready: {String(rechartsReady)} | Recharts: {String(!!window.Recharts)}
+        </div>
+      </div>
+    );
+  }
   const { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } = window.Recharts;"""
 
 jsx = jsx.replace("function Dashboard({ enriched, matches, photos, navigate }) {", DASH_RECH_INJECT)
+
+# Update App to pass rechartsReady to Dashboard
+jsx = jsx.replace(
+    'dash:    <Dashboard {...props} />',
+    'dash:    <Dashboard {...props} rechartsReady={rechartsReady} />'
+)
 
 # ── 14. Build the HTML shell ─────────────────────────────────────────────────
 # Strip <? ... ?> if any remain
@@ -291,19 +322,31 @@ HTML = f"""<!DOCTYPE html>
       div.innerText = "Error: " + msg + "\\nLine: " + line + ":" + col + "\\nStack: " + (error ? error.stack : 'N/A');
       document.body.appendChild(div);
     }};
+  <script>
+    window.loaded_scripts = {{}};
+    function markLoaded(n) {{ window.loaded_scripts[n] = true; }}
+    function markError(n) {{ window.loaded_scripts[n] = "FAILED"; }}
   </script>
-  <!-- React + ReactDOM -->
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <!-- Recharts -->
-  <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
-  <!-- Babel standalone (transpiles JSX in browser) -->
-  <script src="https://unpkg.com/@babel/standalone@7.24.0/babel.min.js"></script>
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js" onload="markLoaded('react')" onerror="markError('react')"></script>
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js" onload="markLoaded('react-dom')" onerror="markError('react-dom')"></script>
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react-is@18/umd/react-is.production.min.js" onload="markLoaded('react-is')" onerror="markError('react-is')"></script>
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/prop-types@15/prop-types.min.js" onload="markLoaded('prop-types')" onerror="markError('prop-types')"></script>
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/recharts@2/umd/Recharts.min.js" onload="markLoaded('recharts')" onerror="markError('recharts')"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js" onload="markLoaded('babel')" onerror="markError('babel')"></script>
 </head>
 <body>
   <div id="splash">
     <div class="ball">\u26bd</div>
     <div class="msg">CALCETTO PRO &nbsp;\u2014&nbsp; caricamento...</div>
+    <div id="debug-info" style="font-size:10px; color:#4d6a94; margin-top:10px; font-family:monospace; text-align:center;"></div>
+    <script>
+      setInterval(() => {{
+        const info = document.getElementById('debug-info');
+        if (info) {{
+          info.innerText = "Scripts: " + JSON.stringify(window.loaded_scripts);
+        }}
+      }}, 500);
+    </script>
     <div class="bar-wrap"><div class="bar"></div></div>
   </div>
   <div id="root"></div>
