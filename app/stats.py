@@ -145,147 +145,82 @@ def _extract_mvp_from_note(note: str) -> str | None:
     return None
 
 
-def _compute_elo_ratings(matches: list[Match], player_names: list[str]) -> dict[str, float]:
-    ratings = {name: ELO_INITIAL_RATING for name in player_names}
+class RatingEngine:
+    """Unified ELO calculation engine to avoid duplication."""
     
-    for match in _sorted_matches(matches):
-        # Win / Loss factor
+    def __init__(self, player_names: list[str]):
+        self.ratings = {name: ELO_INITIAL_RATING for name in player_names}
+    
+    def process_match(self, match: Match) -> dict[str, float]:
+        """Process a single match and update ratings. Returns the current ratings."""
         team_a_names = [r.player for r in match.team_a]
         team_b_names = [r.player for r in match.team_b]
         if not team_a_names or not team_b_names:
-            continue
+            return self.ratings.copy()
+            
         for name in team_a_names + team_b_names:
-            ratings.setdefault(name, ELO_INITIAL_RATING)
+            self.ratings.setdefault(name, ELO_INITIAL_RATING)
+            
+        frozen_ratings = self.ratings.copy()
         
-        # **FIX 1: Freeze ratings at the start of this match**
-        frozen_ratings = ratings.copy()
-        
+        # 1. Win/Loss Delta
         rating_a = sum(frozen_ratings[name] for name in team_a_names) / len(team_a_names)
         rating_b = sum(frozen_ratings[name] for name in team_b_names) / len(team_b_names)
         expected_a = _expected_score(rating_a, rating_b)
         expected_b = 1.0 - expected_a
         
-        if match.goals_a > match.goals_b:
-            actual_a, actual_b = 1.0, 0.0
-        elif match.goals_b > match.goals_a:
-            actual_a, actual_b = 0.0, 1.0
-        else:
-            actual_a = actual_b = 0.5
-        
+        actual_a, actual_b = (1.0, 0.0) if match.goals_a > match.goals_b else \
+                             (0.0, 1.0) if match.goals_b > match.goals_a else (0.5, 0.5)
+                             
         delta_a = ELO_K_FACTOR * (actual_a - expected_a)
         delta_b = ELO_K_FACTOR * (actual_b - expected_b)
         
-        for name in team_a_names:
-            ratings[name] += delta_a
-        for name in team_b_names:
-            ratings[name] += delta_b
+        for name in team_a_names: self.ratings[name] += delta_a
+        for name in team_b_names: self.ratings[name] += delta_b
         
-        # **FIX 2: Goal factor - compare within team only**
+        # 2. Performance Deltas (Goals/Assists) - Zero-sum within team
         all_players = team_a_names + team_b_names
-        goal_deltas = {name: 0.0 for name in all_players}
+        performance_deltas = {name: 0.0 for name in all_players}
         
-        # Process Team A goals
-        team_a_goals = sum(row.goals for row in match.players if row.player in team_a_names)
-        if team_a_goals > 0:
-            avg_team_a_rating = sum(frozen_ratings[name] for name in team_a_names) / len(team_a_names)
+        for team_names, factor, attr in [
+            (team_a_names, ELO_GOAL_K_FACTOR, 'goals'),
+            (team_b_names, ELO_GOAL_K_FACTOR, 'goals'),
+            (team_a_names, ELO_ASSIST_K_FACTOR, 'assists'),
+            (team_b_names, ELO_ASSIST_K_FACTOR, 'assists')
+        ]:
+            team_total = sum(getattr(r, attr) for r in match.players if r.player in team_names)
+            if team_total > 0:
+                avg_team_rating = sum(frozen_ratings[n] for n in team_names) / len(team_names)
+                for r in match.players:
+                    if r.player in team_names and getattr(r, attr) > 0:
+                        val = getattr(r, attr)
+                        expected_share = _expected_score(frozen_ratings[r.player], avg_team_rating)
+                        actual_share = val / team_total
+                        delta = factor * val * (actual_share - expected_share)
+                        performance_deltas[r.player] += delta
+                        # Distribute penalty to ALL in match to keep zero-sum
+                        penalty = -delta / (len(all_players) - 1)
+                        for other in all_players:
+                            if other != r.player: performance_deltas[other] += penalty
+                            
+        for name, delta in performance_deltas.items():
+            self.ratings[name] += delta
             
-            for row in match.players:
-                if row.player in team_a_names and row.goals > 0:
-                    player_rating = frozen_ratings[row.player]
-                    expected_share = _expected_score(player_rating, avg_team_a_rating)
-                    actual_share = row.goals / team_a_goals  # Compare to team's goals only
-                    
-                    delta = ELO_GOAL_K_FACTOR * row.goals * (actual_share - expected_share)
-                    goal_deltas[row.player] += delta
-                    
-                    if row.player == "Lustrati":
-                        print(f"Lustrati goals: {row.goals}, delta: {delta}")
-                        print(f"Expected share: {expected_share}, actual share: {actual_share}")
-                        print(f"Rating: {frozen_ratings[row.player]} -> {ratings[row.player] + delta}")
-                    
-                    # Distribute penalty to all other players (zero-sum)
-                    penalty_per_player = -delta / (len(all_players) - 1)
-                    for other_name in all_players:
-                        if other_name != row.player:
-                            goal_deltas[other_name] += penalty_per_player
-        
-        # Process Team B goals
-        team_b_goals = sum(row.goals for row in match.players if row.player in team_b_names)
-        if team_b_goals > 0:
-            avg_team_b_rating = sum(frozen_ratings[name] for name in team_b_names) / len(team_b_names)
+        # 3. MVP Bonus
+        from app.data_io import Match, DataBundle, MatchPlayerRow
+        from app.utils import _extract_mvp_name, _month_label, SEASON2_START
+        mvp = _extract_mvp_name(match.note)
+        if mvp and mvp in self.ratings:
+            self.ratings[mvp] += ELO_MVP_BONUS
             
-            for row in match.players:
-                if row.player in team_b_names and row.goals > 0:
-                    player_rating = frozen_ratings[row.player]
-                    expected_share = _expected_score(player_rating, avg_team_b_rating)
-                    actual_share = row.goals / team_b_goals  # Compare to team's goals only
-                    
-                    delta = ELO_GOAL_K_FACTOR * row.goals * (actual_share - expected_share)
-                    goal_deltas[row.player] += delta
-                    
-                    # Distribute penalty to all other players (zero-sum)
-                    penalty_per_player = -delta / (len(all_players) - 1)
-                    for other_name in all_players:
-                        if other_name != row.player:
-                            goal_deltas[other_name] += penalty_per_player
-        
-        # Apply all goal deltas at once
-        for name, delta in goal_deltas.items():
-            ratings[name] += delta
-        
-        # **FIX 2: Assist factor - compare within team only**
-        assist_deltas = {name: 0.0 for name in all_players}
-        
-        # Process Team A assists
-        team_a_assists = sum(row.assists for row in match.players if row.player in team_a_names)
-        if team_a_assists > 0:
-            avg_team_a_rating = sum(frozen_ratings[name] for name in team_a_names) / len(team_a_names)
-            
-            for row in match.players:
-                if row.player in team_a_names and row.assists > 0:
-                    player_rating = frozen_ratings[row.player]
-                    expected_share = _expected_score(player_rating, avg_team_a_rating)
-                    actual_share = row.assists / team_a_assists  # Compare to team's assists only
-                    
-                    delta = ELO_ASSIST_K_FACTOR * row.assists * (actual_share - expected_share)
-                    assist_deltas[row.player] += delta
-                    
-                    # Distribute penalty to all other players (zero-sum)
-                    penalty_per_player = -delta / (len(all_players) - 1)
-                    for other_name in all_players:
-                        if other_name != row.player:
-                            assist_deltas[other_name] += penalty_per_player
-        
-        # Process Team B assists
-        team_b_assists = sum(row.assists for row in match.players if row.player in team_b_names)
-        if team_b_assists > 0:
-            avg_team_b_rating = sum(frozen_ratings[name] for name in team_b_names) / len(team_b_names)
-            
-            for row in match.players:
-                if row.player in team_b_names and row.assists > 0:
-                    player_rating = frozen_ratings[row.player]
-                    expected_share = _expected_score(player_rating, avg_team_b_rating)
-                    actual_share = row.assists / team_b_assists  # Compare to team's assists only
-                    
-                    delta = ELO_ASSIST_K_FACTOR * row.assists * (actual_share - expected_share)
-                    assist_deltas[row.player] += delta
-                    
-                    # Distribute penalty to all other players (zero-sum)
-                    penalty_per_player = -delta / (len(all_players) - 1)
-                    for other_name in all_players:
-                        if other_name != row.player:
-                            assist_deltas[other_name] += penalty_per_player
-        
-        # Apply all assist deltas at once
-        for name, delta in assist_deltas.items():
-            ratings[name] += delta
-        
-        # MVP factor (flat bonus, not zero-sum)
-        mvp_name = _extract_mvp_from_note(match.note)
-        if mvp_name and mvp_name in ratings:
-            ratings[mvp_name] += ELO_MVP_BONUS
-    
-    return ratings
+        return self.ratings.copy()
+
+def _compute_elo_ratings(matches: list[Match], player_names: list[str]) -> dict[str, float]:
+    engine = RatingEngine(player_names)
+    final_ratings = {}
+    for match in _sorted_matches(matches):
+        final_ratings = engine.process_match(match)
+    return final_ratings or {name: ELO_INITIAL_RATING for name in player_names}
 
 
 def match_to_view(match: Match) -> MatchView:
@@ -539,82 +474,12 @@ def player_cumulative_series(matches: list[Match], player_name: str) -> tuple[li
         "win_rate": {"label": "Win Rate %", "values": []},
     }
 
+    engine = RatingEngine([player_name])
+    
     for match in _sorted_matches(matches):
-        team_a_names = [r.player for r in match.team_a]
-        team_b_names = [r.player for r in match.team_b]
-        if not team_a_names or not team_b_names:
-            continue
-
-        for name in team_a_names + team_b_names:
-            ratings.setdefault(name, ELO_INITIAL_RATING)
-
-        rating_a = sum(ratings[name] for name in team_a_names) / len(team_a_names)
-        rating_b = sum(ratings[name] for name in team_b_names) / len(team_b_names)
-        expected_a = _expected_score(rating_a, rating_b)
-        expected_b = 1.0 - expected_a
-
-        if match.goals_a > match.goals_b:
-            actual_a, actual_b = 1.0, 0.0
-        elif match.goals_b > match.goals_a:
-            actual_a, actual_b = 0.0, 1.0
-        else:
-            actual_a = actual_b = 0.5
-
-        delta_a = ELO_K_FACTOR * (actual_a - expected_a)
-        delta_b = ELO_K_FACTOR * (actual_b - expected_b)
-
-        for name in team_a_names:
-            ratings[name] += delta_a
-        for name in team_b_names:
-            ratings[name] += delta_b
-
-        # Goal factor (zero-sum)
-        all_players = team_a_names + team_b_names
-        total_goals = match.goals_a + match.goals_b
+        current_ratings = engine.process_match(match)
         
-        if total_goals > 0:
-            avg_rating = sum(ratings[name] for name in all_players) / len(all_players)
-            
-            for row in match.players:
-                if row.goals > 0:
-                    player_rating = ratings[row.player]
-                    expected_share = _expected_score(player_rating, avg_rating)
-                    actual_share = row.goals / total_goals
-                    
-                    delta = ELO_GOAL_K_FACTOR * row.goals * (actual_share - expected_share)
-                    ratings[row.player] += delta
-                    
-                    penalty_per_player = -delta / (len(all_players) - 1)
-                    for other_name in all_players:
-                        if other_name != row.player:
-                            ratings[other_name] += penalty_per_player
-
-        # Assist factor (zero-sum)
-        total_assists = sum(r.assists for r in match.players)
-        
-        if total_assists > 0:
-            avg_rating = sum(ratings[name] for name in all_players) / len(all_players)
-            
-            for row in match.players:
-                if row.assists > 0:
-                    player_rating = ratings[row.player]
-                    expected_share = _expected_score(player_rating, avg_rating)
-                    actual_share = row.assists / total_assists
-                    
-                    delta = ELO_ASSIST_K_FACTOR * row.assists * (actual_share - expected_share)
-                    ratings[row.player] += delta
-                    
-                    penalty_per_player = -delta / (len(all_players) - 1)
-                    for other_name in all_players:
-                        if other_name != row.player:
-                            ratings[other_name] += penalty_per_player
-
-        # MVP factor
-        mvp_name = _extract_mvp_from_note(match.note)
-        if mvp_name and mvp_name in ratings:
-            ratings[mvp_name] += ELO_MVP_BONUS
-
-        if player_name not in team_a_names and player_name not in team_b_names:
+        if player_name not in [r.player for r in match.team_a] and player_name not in [r.player for r in match.team_b]:
             continue
 
         on_team_a = any(r.player == player_name for r in match.team_a)
@@ -672,150 +537,15 @@ def multi_player_cumulative_series(
     }
 
     selected = set(player_names)
+    engine = RatingEngine(player_names)
+    
     for match in _sorted_matches(matches):
-        # Win / Loss factor
+        current_ratings = engine.process_match(match)
+        
         team_a_names = [r.player for r in match.team_a]
         team_b_names = [r.player for r in match.team_b]
         if not team_a_names or not team_b_names:
             continue
-        for name in team_a_names + team_b_names:
-            ratings.setdefault(name, ELO_INITIAL_RATING)
-        
-        # **FIX 1: Freeze ratings at the start of this match**
-        frozen_ratings = ratings.copy()
-        
-        rating_a = sum(frozen_ratings[name] for name in team_a_names) / len(team_a_names)
-        rating_b = sum(frozen_ratings[name] for name in team_b_names) / len(team_b_names)
-        expected_a = _expected_score(rating_a, rating_b)
-        expected_b = 1.0 - expected_a
-        
-        if match.goals_a > match.goals_b:
-            actual_a, actual_b = 1.0, 0.0
-        elif match.goals_b > match.goals_a:
-            actual_a, actual_b = 0.0, 1.0
-        else:
-            actual_a = actual_b = 0.5
-        
-        delta_a = ELO_K_FACTOR * (actual_a - expected_a)
-        delta_b = ELO_K_FACTOR * (actual_b - expected_b)
-        
-        for name in team_a_names:
-            ratings[name] += delta_a
-        for name in team_b_names:
-            ratings[name] += delta_b
-        
-        # **FIX 2: Goal factor - compare within team only**
-        all_players = team_a_names + team_b_names
-        goal_deltas = {name: 0.0 for name in all_players}
-        
-        # Process Team A goals
-        team_a_goals = sum(row.goals for row in match.players if row.player in team_a_names)
-        if team_a_goals > 0:
-            avg_team_a_rating = sum(frozen_ratings[name] for name in team_a_names) / len(team_a_names)
-            
-            for row in match.players:
-                if row.player in team_a_names and row.goals > 0:
-                    player_rating = frozen_ratings[row.player]
-                    expected_share = _expected_score(player_rating, avg_team_a_rating)
-                    actual_share = row.goals / team_a_goals  # Compare to team's goals only
-                    
-                    delta = ELO_GOAL_K_FACTOR * row.goals * (actual_share - expected_share)
-                    goal_deltas[row.player] += delta
-                    
-                    if row.player == "Lustrati":
-                        print("Multi function")
-                        print(f"Lustrati goals: {row.goals}, delta: {delta}")
-                        print(f"Expected share: {expected_share}, actual share: {actual_share}")
-                        print(f"Rating: {frozen_ratings[row.player]} -> {ratings[row.player] + delta}")
-                    
-                    # Distribute penalty to all other players (zero-sum)
-                    penalty_per_player = -delta / (len(all_players) - 1)
-                    for other_name in all_players:
-                        if other_name != row.player:
-                            goal_deltas[other_name] += penalty_per_player
-        
-        # Process Team B goals
-        team_b_goals = sum(row.goals for row in match.players if row.player in team_b_names)
-        if team_b_goals > 0:
-            avg_team_b_rating = sum(frozen_ratings[name] for name in team_b_names) / len(team_b_names)
-            
-            for row in match.players:
-                if row.player in team_b_names and row.goals > 0:
-                    player_rating = frozen_ratings[row.player]
-                    expected_share = _expected_score(player_rating, avg_team_b_rating)
-                    actual_share = row.goals / team_b_goals  # Compare to team's goals only
-                    
-                    delta = ELO_GOAL_K_FACTOR * row.goals * (actual_share - expected_share)
-                    goal_deltas[row.player] += delta
-                    
-                    # Distribute penalty to all other players (zero-sum)
-                    penalty_per_player = -delta / (len(all_players) - 1)
-                    for other_name in all_players:
-                        if other_name != row.player:
-                            goal_deltas[other_name] += penalty_per_player
-        
-        # Apply all goal deltas at once
-        for name, delta in goal_deltas.items():
-            ratings[name] += delta
-        
-        # **FIX 2: Assist factor - compare within team only**
-        assist_deltas = {name: 0.0 for name in all_players}
-        
-        # Process Team A assists
-        team_a_assists = sum(row.assists for row in match.players if row.player in team_a_names)
-        if team_a_assists > 0:
-            avg_team_a_rating = sum(frozen_ratings[name] for name in team_a_names) / len(team_a_names)
-            
-            for row in match.players:
-                if row.player in team_a_names and row.assists > 0:
-                    player_rating = frozen_ratings[row.player]
-                    expected_share = _expected_score(player_rating, avg_team_a_rating)
-                    actual_share = row.assists / team_a_assists  # Compare to team's assists only
-                    
-                    delta = ELO_ASSIST_K_FACTOR * row.assists * (actual_share - expected_share)
-                    assist_deltas[row.player] += delta
-                    
-                    # Distribute penalty to all other players (zero-sum)
-                    penalty_per_player = -delta / (len(all_players) - 1)
-                    for other_name in all_players:
-                        if other_name != row.player:
-                            assist_deltas[other_name] += penalty_per_player
-        
-        # Process Team B assists
-        team_b_assists = sum(row.assists for row in match.players if row.player in team_b_names)
-        if team_b_assists > 0:
-            avg_team_b_rating = sum(frozen_ratings[name] for name in team_b_names) / len(team_b_names)
-            
-            for row in match.players:
-                if row.player in team_b_names and row.assists > 0:
-                    player_rating = frozen_ratings[row.player]
-                    expected_share = _expected_score(player_rating, avg_team_b_rating)
-                    actual_share = row.assists / team_b_assists  # Compare to team's assists only
-                    
-                    delta = ELO_ASSIST_K_FACTOR * row.assists * (actual_share - expected_share)
-                    assist_deltas[row.player] += delta
-                    
-                    # Distribute penalty to all other players (zero-sum)
-                    penalty_per_player = -delta / (len(all_players) - 1)
-                    for other_name in all_players:
-                        if other_name != row.player:
-                            assist_deltas[other_name] += penalty_per_player
-        
-        # Apply all assist deltas at once
-        for name, delta in assist_deltas.items():
-            ratings[name] += delta
-        
-        # MVP factor (flat bonus, not zero-sum)
-        mvp_name = _extract_mvp_from_note(match.note)
-        if mvp_name and mvp_name in ratings:
-            ratings[mvp_name] += ELO_MVP_BONUS
-
-        names_in_match = {r.player for r in match.players}
-        played_selected = list(names_in_match & selected)
-        if not played_selected:
-            continue
-
-        labels.append(match.date.strftime("%Y-%m-%d"))
         snapshots: dict[str, dict[str, float | int]] = {}
 
         for player_name in played_selected:
@@ -837,7 +567,7 @@ def multi_player_cumulative_series(
             played = counters[player_name]["wins"] + counters[player_name]["draws"] + counters[player_name]["losses"]
             win_rate = (counters[player_name]["wins"] / played) * 100.0 if played else 0.0
             snapshots[player_name] = {
-                "elo": round(ratings.get(player_name, ELO_INITIAL_RATING), 2),
+                "elo": round(current_ratings.get(player_name, ELO_INITIAL_RATING), 2),
                 "wins": counters[player_name]["wins"],
                 "draws": counters[player_name]["draws"],
                 "losses": counters[player_name]["losses"],
@@ -860,7 +590,6 @@ def comparison_cumulative_series(
     matches: list[Match], primary_player: str, secondary_player: str
 ) -> tuple[list[str], dict[str, dict[str, Any]]]:
     labels: list[str] = []
-    ratings: dict[str, float] = {}
     players = [primary_player, secondary_player]
     counters = {
         primary_player: {"wins": 0, "draws": 0, "losses": 0, "goals_scored": 0, "assists": 0, "goals_conceded": 0},
@@ -879,84 +608,18 @@ def comparison_cumulative_series(
         "win_rate": {"label": "Win Rate %", "primary_values": [], "secondary_values": []},
     }
 
+    engine = RatingEngine(players)
     for match in _sorted_matches(matches):
+        current_ratings = engine.process_match(match)
+        
         team_a_names = [r.player for r in match.team_a]
         team_b_names = [r.player for r in match.team_b]
         if not team_a_names or not team_b_names:
             continue
 
-        for name in team_a_names + team_b_names:
-            ratings.setdefault(name, ELO_INITIAL_RATING)
-
-        rating_a = sum(ratings[name] for name in team_a_names) / len(team_a_names)
-        rating_b = sum(ratings[name] for name in team_b_names) / len(team_b_names)
-        expected_a = _expected_score(rating_a, rating_b)
-        expected_b = 1.0 - expected_a
-
-        if match.goals_a > match.goals_b:
-            actual_a, actual_b = 1.0, 0.0
-        elif match.goals_b > match.goals_a:
-            actual_a, actual_b = 0.0, 1.0
-        else:
-            actual_a = actual_b = 0.5
-
-        delta_a = ELO_K_FACTOR * (actual_a - expected_a)
-        delta_b = ELO_K_FACTOR * (actual_b - expected_b)
-
-        for name in team_a_names:
-            ratings[name] += delta_a
-        for name in team_b_names:
-            ratings[name] += delta_b
-
-        # Goal factor (zero-sum)
-        all_players = team_a_names + team_b_names
-        total_goals = match.goals_a + match.goals_b
-        
-        if total_goals > 0:
-            avg_rating = sum(ratings[name] for name in all_players) / len(all_players)
-            
-            for row in match.players:
-                if row.goals > 0:
-                    player_rating = ratings[row.player]
-                    expected_share = _expected_score(player_rating, avg_rating)
-                    actual_share = row.goals / total_goals
-                    
-                    delta = ELO_GOAL_K_FACTOR * row.goals * (actual_share - expected_share)
-                    ratings[row.player] += delta
-                    
-                    penalty_per_player = -delta / (len(all_players) - 1)
-                    for other_name in all_players:
-                        if other_name != row.player:
-                            ratings[other_name] += penalty_per_player
-
-        # Assist factor (zero-sum)
-        total_assists = sum(r.assists for r in match.players)
-        
-        if total_assists > 0:
-            avg_rating = sum(ratings[name] for name in all_players) / len(all_players)
-            
-            for row in match.players:
-                if row.assists > 0:
-                    player_rating = ratings[row.player]
-                    expected_share = _expected_score(player_rating, avg_rating)
-                    actual_share = row.assists / total_assists
-                    
-                    delta = ELO_ASSIST_K_FACTOR * row.assists * (actual_share - expected_share)
-                    ratings[row.player] += delta
-                    
-                    penalty_per_player = -delta / (len(all_players) - 1)
-                    for other_name in all_players:
-                        if other_name != row.player:
-                            ratings[other_name] += penalty_per_player
-
-        # MVP factor
-        mvp_name = _extract_mvp_from_note(match.note)
-        if mvp_name and mvp_name in ratings:
-            ratings[mvp_name] += ELO_MVP_BONUS
-
         played_by = {
-            primary_player: primary_player in team_a_names or primary_player in team_b_names,
-            secondary_player: secondary_player in team_a_names or secondary_player in team_b_names,
+            primary_player: any(r.player == primary_player for r in match.players),
+            secondary_player: any(r.player == secondary_player for r in match.players),
         }
         if not played_by[primary_player] and not played_by[secondary_player]:
             continue
@@ -986,7 +649,7 @@ def comparison_cumulative_series(
             win_rate = (counters[player_name]["wins"] / played) * 100.0 if played else 0.0
 
             snapshots[player_name] = {
-                "elo": round(ratings.get(player_name, ELO_INITIAL_RATING), 2),
+                "elo": round(current_ratings.get(player_name, ELO_INITIAL_RATING), 2),
                 "wins": counters[player_name]["wins"],
                 "draws": counters[player_name]["draws"],
                 "losses": counters[player_name]["losses"],

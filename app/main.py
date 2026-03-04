@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from .data_io import (
+from app.data_io import (
     DataBundle,
     MatchPlayerRow,
     add_player,
@@ -21,18 +21,16 @@ from .data_io import (
     load_players,
     soft_delete_match,
     write_match_excel,
+    load_matches, Match
 )
-from .stats import (
-    build_dashboard,
-    combined_together_stats,
-    compute_player_stats,
-    match_to_view,
-    multi_player_cumulative_series,
-    multi_player_matches_views,
-    player_cumulative_series,
-    player_matches_views,
-    primary_on_off_stats,
+from app.stats import (
+    compute_player_stats, build_dashboard, player_matches_views,
+    comparison_matches_views, player_cumulative_series,
+    multi_player_matches_views, multi_player_cumulative_series,
+    comparison_cumulative_series, combined_together_stats,
+    primary_on_off_stats, DashboardData
 )
+from app.utils import _extract_mvp_name, _month_label, SEASON2_START
 
 app = FastAPI(title="Calcetto App")
 # Session cookie lasts only for the browser session (no multi-day persistence).
@@ -41,199 +39,149 @@ app.add_middleware(SessionMiddleware, secret_key="dev-secret-calcetto", max_age=
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+# Note: Jinja2Templates directory choice depends on deployment.
+# We'll stick with the logic from the restored file.
 templates = Jinja2Templates(directory="app/templates_legacy")
 
 # React SPA index
 SPA_INDEX = Path(__file__).resolve().parent / "templates" / "spa.html"
 
-# Season 2 starts after this date
-SEASON2_START = date(2025, 5, 1)
 
-
-def _extract_mvp_name(note: str) -> str:
-    """Extract MVP surname/name from match note."""
-    if not note:
-        return ""
-    m = re.search(r'mvp=([^;]+)', note, re.IGNORECASE)
-    return m.group(1).strip() if m else ""
-
-
-def _month_label(d: date) -> str:
-    months = ["Gen", "Feb", "Mar", "Apr", "Mag", "Giu",
-               "Lug", "Ago", "Set", "Ott", "Nov", "Dic"]
-    return f"{months[d.month - 1]}'{str(d.year)[2:]}"
+def current_user(request: Request) -> str | None:
+    return request.session.get("user")
 
 
 @app.on_event("startup")
-def on_startup() -> None:
+def startup_event():
     initialize_data_dirs()
 
 
-def current_user(request: Request) -> str | None:
-    user = request.session.get("user")
-    if isinstance(user, str) and user.strip():
-        return user
-    return None
-
-
-def _normalize_name(value: str) -> str:
-    return " ".join(value.strip().split()).lower()
-
-
-def _parse_int_query_list(values: list[str]) -> list[int]:
-    parsed: list[int] = []
-    for raw in values:
-        cleaned = str(raw).strip()
-        if not cleaned:
-            continue
-        try:
-            parsed.append(int(cleaned))
-        except ValueError:
-            continue
-    return parsed
-
-
-def _parse_match_note(note: str) -> dict[str, str]:
-    info: dict[str, str] = {}
-    for part in note.split(";"):
-        if "=" not in part:
-            continue
-        key, value = part.split("=", 1)
-        key = key.strip().lower()
-        value = value.strip()
-        if key and value:
-            info[key] = value
-    return info
-
-
-def require_user(request: Request) -> RedirectResponse | None:
-    user = current_user(request)
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-
-    valid_names = {p.name for p in load_players()}
-    if user not in valid_names:
-        request.session.clear()
-        return RedirectResponse(url="/login", status_code=303)
-
-    return None
-
-
-def render_page(request: Request, template: str, bundle: DataBundle, extra: dict[str, Any] | None = None) -> HTMLResponse:
-    context: dict[str, Any] = {
-        "request": request,
-        "current_user": current_user(request),
-        "invalid_count": len(bundle.invalid_files),
-    }
-    if extra:
-        context.update(extra)
-    return templates.TemplateResponse(template, context)
-
-
 # ─────────────────────────────────────────────
-# ROOT — serve the React SPA
+# PAGES (REST API)
 # ─────────────────────────────────────────────
+
 @app.get("/", response_class=HTMLResponse)
-def index(request: Request) -> HTMLResponse:
-    if SPA_INDEX.exists():
-        return FileResponse(str(SPA_INDEX), media_type="text/html")
-    # Fallback to legacy dashboard if SPA not built yet
-    redirect = require_user(request)
-    if redirect:
-        return redirect
+def index(request: Request):
+    """Serve the modern React SPA."""
+    if not SPA_INDEX.exists():
+        # Fallback to dev message if spa.html isn't generated yet
+        return HTMLResponse("<h1>Calcetto App</h1><p>SPA template (spa.html) not found. Run scripts/generate_spa.py first.</p>")
+    return FileResponse(SPA_INDEX)
+
+
+@app.get("/legacy", response_class=HTMLResponse)
+def page_index(request: Request):
     bundle = load_bundle()
-    dashboard = build_dashboard(matches=bundle.matches, player_names=[p.name for p in bundle.players])
-    return render_page(request, "index.html", bundle, {"dashboard": dashboard})
+    dashboard = build_dashboard(bundle.matches)
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "players": dashboard.players,
+            "matches": dashboard.matches,
+            "invalid_files": dashboard.invalid_files,
+            "user": current_user(request),
+        },
+    )
+
+
+@app.get("/login", response_class=HTMLResponse)
+def page_login(request: Request):
+    players = load_players()
+    return templates.TemplateResponse(
+        "login.html", {"request": request, "players": players, "user": current_user(request)}
+    )
+
+
+@app.post("/login")
+def login_post(request: Request, player_name: str = Form(...)):
+    request.session["user"] = player_name
+    return RedirectResponse(url="/", status_code=303)
+
+
+@app.get("/logout")
+@app.post("/api/logout")
+def logout(request: Request):
+    request.session.clear()
+    if request.method == "POST":
+        return JSONResponse({"status": "ok"})
+    return RedirectResponse(url="/", status_code=303)
 
 
 # ─────────────────────────────────────────────
-# JSON API — Auth
+# JSON API — Login/Auth
 # ─────────────────────────────────────────────
+
 @app.get("/api/me")
-def api_me(request: Request) -> JSONResponse:
+def api_me(request: Request):
     user = current_user(request)
     return JSONResponse({"user": user})
 
 
 @app.post("/api/login")
-async def api_login(request: Request) -> JSONResponse:
+async def api_login(request: Request):
     body = await request.json()
-    player_name = str(body.get("player_name", "")).strip()
-    bundle = load_bundle()
-    valid_names = {p.name for p in bundle.players}
-    if player_name not in valid_names:
-        return JSONResponse({"error": "Invalid player name"}, status_code=400)
+    player_name = body.get("player_name")
+    if not player_name:
+        return JSONResponse({"error": "Missing player_name"}, status_code=400)
     request.session["user"] = player_name
     return JSONResponse({"user": player_name})
-
-
-@app.post("/api/logout")
-def api_logout(request: Request) -> JSONResponse:
-    request.session.clear()
-    return JSONResponse({"ok": True})
 
 
 # ─────────────────────────────────────────────
 # JSON API — Players
 # ─────────────────────────────────────────────
+
 @app.get("/api/players")
 def api_players(request: Request) -> JSONResponse:
     bundle = load_bundle()
-    stats_map = compute_player_stats(bundle.matches, [p.name for p in bundle.players])
+    player_names = [p.name for p in bundle.players]
+    stats_map = compute_player_stats(bundle.matches, player_names)
+    
+    # Calculate MVP counts
+    mvp_counts = {}
+    for m in bundle.matches:
+        mvp = _extract_mvp_name(m.note)
+        if mvp:
+            mvp_counts[mvp] = mvp_counts.get(mvp, 0) + 1
 
-    # Build per-player MVP count and autogol from match data
-    mvp_counts: dict[str, int] = {}
-    autogol_counts: dict[str, int] = {}
-    for match in bundle.matches:
-        mvp_name = _extract_mvp_name(match.note)
-        if mvp_name:
-            mvp_counts[mvp_name] = mvp_counts.get(mvp_name, 0) + 1
-        # autogol: players whose individual goals < 0 (not currently tracked)
-        # We leave autogol as 0 unless the data records them
+    # Autogol counts (dummy for now, match doesn't report them clearly)
+    autogol_counts = {}
 
-    result = []
+    players_list = []
     for player in bundle.players:
         s = stats_map.get(player.name)
         if not s:
             continue
+            
         name_parts = player.name.strip().split()
         cognome = name_parts[-1] if name_parts else player.name
         nome = " ".join(name_parts[:-1]) if len(name_parts) > 1 else ""
-        wins = s.wins
-        partite = s.matches
-        vittorie_pct = round((wins / partite * 100) if partite > 0 else 0)
-        gol = s.goals_scored
-        assist = s.assists
-        ga = gol + assist
-        gol_pp = round(gol / partite, 2) if partite > 0 else 0
-        assist_pp = round(assist / partite, 2) if partite > 0 else 0
-        ga_pp = round(ga / partite, 2) if partite > 0 else 0
         mvp = mvp_counts.get(player.name, 0)
-        result.append({
+
+        players_list.append({
             "id": str(player.id),
-            "name": player.name,
+            "name": s.name,
             "cognome": cognome,
             "nome": nome,
-            "partite": partite,
-            "vittorie": wins,
-            "vittorie_pct": vittorie_pct,
-            "gol": gol,
-            "gol_pp": gol_pp,
-            "assist": assist,
-            "assist_pp": assist_pp,
-            "ga": ga,
-            "ga_pp": ga_pp,
+            "partite": s.matches,
+            "vittorie": s.wins,
+            "vittorie_pct": round(s.win_rate * 100),
+            "gol": s.goals_scored,
+            "gol_pp": round(s.goals_per_match, 2),
+            "assist": s.assists,
+            "assist_pp": round(s.assists / s.matches if s.matches else 0, 2),
+            "ga": s.goals_scored + s.assists,
+            "ga_pp": round(s.goals_per_match + (s.assists / s.matches if s.matches else 0), 2),
             "mvp": mvp,
             "intonso": 0,   # not tracked at match level currently
             "autogol": autogol_counts.get(player.name, 0),
             "elo": round(s.elo_rating, 1),
         })
-    return JSONResponse(result)
+    return JSONResponse(players_list)
 
 
-# ─────────────────────────────────────────────
-# JSON API — Matches
-# ─────────────────────────────────────────────
 @app.get("/api/matches")
 def api_matches(request: Request) -> JSONResponse:
     bundle = load_bundle()
@@ -242,7 +190,6 @@ def api_matches(request: Request) -> JSONResponse:
         mvp = _extract_mvp_name(match.note)
         gol = match.goals_a + match.goals_b
         assist_total = sum(r.assists for r in match.players)
-        # autogol not currently stored separately
         season = 2 if match.date >= SEASON2_START else 1
         result.append({
             "match_id": match.match_id,
@@ -269,519 +216,70 @@ async def api_matches_submit(request: Request) -> JSONResponse:
         return JSONResponse({"error": "Not authenticated"}, status_code=401)
     body = await request.json()
     bundle = load_bundle()
+    
+    from app.utils import normalize_name
     valid_names = {p.name for p in bundle.players}
-    valid_names_normalized = {_normalize_name(n) for n in valid_names}
+    valid_names_normalized = {normalize_name(n) for n in valid_names}
 
     date_str = str(body.get("date", "")).strip()
-    if not date_str:
-        return JSONResponse({"error": "Date is required"}, status_code=400)
+    note = str(body.get("note", "")).strip()
+    players_data = body.get("players", [])
+
+    if not date_str or not players_data:
+        return JSONResponse({"error": "Date and players are required"}, status_code=400)
+
     try:
         match_date = date.fromisoformat(date_str)
     except ValueError:
-        return JSONResponse({"error": "Date must be in YYYY-MM-DD format"}, status_code=400)
+        return JSONResponse({"error": "Invalid date format (use YYYY-MM-DD)"}, status_code=400)
 
-    note = str(body.get("note", "")).strip()
-    mvp_val = str(body.get("mvp", "")).strip()
-    if mvp_val:
-        if note:
-            note += f";mvp={mvp_val}"
-        else:
-            note = f"mvp={mvp_val}"
-
-    rows_raw = body.get("players", [])
-    if not isinstance(rows_raw, list) or len(rows_raw) != 10:
-        return JSONResponse({"error": "Exactly 10 player rows required"}, status_code=400)
-
-    new_players: list[str] = []
-    rows: list[MatchPlayerRow] = []
-    seen: set[str] = set()
-    for row in rows_raw:
-        team = str(row.get("team", "")).strip().upper()
-        player = str(row.get("player", "")).strip()
-        goals_raw = row.get("goals", 0)
-        assists_raw = row.get("assists", 0)
-        if team not in {"A", "B"}:
-            return JSONResponse({"error": f"Invalid team '{team}'"}, status_code=400)
-        if not player:
-            return JSONResponse({"error": "Player name is required"}, status_code=400)
-        norm = _normalize_name(player)
-        if norm in seen:
-            return JSONResponse({"error": f"Duplicate player: {player}"}, status_code=400)
-        seen.add(norm)
-        if norm not in valid_names_normalized:
-            new_players.append(player)
-        try:
-            goals = int(goals_raw)
-            assists = int(assists_raw)
-        except (TypeError, ValueError):
-            return JSONResponse({"error": "Goals and assists must be integers"}, status_code=400)
-        if goals < 0 or assists < 0:
-            return JSONResponse({"error": "Goals/assists must be >= 0"}, status_code=400)
-        rows.append(MatchPlayerRow(team=team, player=player, goals=goals, assists=assists))
-
-    for name in new_players:
-        try:
-            add_player(name)
-        except ValueError:
-            pass  # already exists
+    rows = []
+    for p in players_data:
+        name = str(p.get("player", "")).strip()
+        if normalize_name(name) not in valid_names_normalized:
+            return JSONResponse({"error": f"Unknown player: {name}"}, status_code=400)
+        
+        rows.append(MatchPlayerRow(
+            team=p.get("team"),
+            player=name,
+            goals=int(p.get("goals", 0)),
+            assists=int(p.get("assists", 0))
+        ))
 
     try:
-        match_id = write_match_excel(match_date=match_date, note=note, rows=rows)
-    except ValueError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
+        match_id = write_match_excel(match_date, note, rows)
+        return JSONResponse({"status": "ok", "match_id": match_id})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
 
-    return JSONResponse({"match_id": match_id})
 
-
-@app.get("/profile", response_class=HTMLResponse)
-def profile_page(
-    request: Request,
-    compare_with: list[str] = Query(default=[]),
-    combo_size: int = 2,
-    combo_with: list[str] = Query(default=[]),
-) -> HTMLResponse:
-    redirect = require_user(request)
-    if redirect:
-        return redirect
-
+@app.get("/api/stats/player/{player_name}")
+def api_player_stats(player_name: str):
     bundle = load_bundle()
-    user_name = current_user(request)
-    if not user_name:
-        return RedirectResponse(url="/login", status_code=303)
-    player = next((p for p in bundle.players if p.name == user_name), None)
-    if not player:
-        raise HTTPException(status_code=404, detail="Logged user not found in players")
-
-    stats_map = compute_player_stats(bundle.matches, [p.name for p in bundle.players])
-    pstats = stats_map[player.name]
-    player_matches = player_matches_views(bundle.matches, player.name)  # Fallback for default view.
-    compare_candidates = [p for p in bundle.players if p.id != player.id]
-    candidates_by_id = {p.id: p for p in compare_candidates}
-
-    compare_selected_ids: list[int] = []
-    for cid in _parse_int_query_list(compare_with):
-        if cid == player.id or cid in compare_selected_ids or cid not in candidates_by_id:
-            continue
-        compare_selected_ids.append(cid)
-    compare_selected_ids = compare_selected_ids[:3]
-    compare_selected_players = [candidates_by_id[cid] for cid in compare_selected_ids]
-    compare_stats_list = [stats_map[p.name] for p in compare_selected_players]
-
-    normalized_combo_size = combo_size if combo_size in {2, 3, 4} else 2
-    needed_partners = normalized_combo_size - 1
-    combo_selected_ids: list[int] = []
-    for cid in _parse_int_query_list(combo_with):
-        if cid == player.id or cid in combo_selected_ids or cid not in candidates_by_id:
-            continue
-        combo_selected_ids.append(cid)
-    combo_selected_ids = combo_selected_ids[:needed_partners]
-    combo_selected_players = [candidates_by_id[cid] for cid in combo_selected_ids]
-
-    compare_active = len(compare_selected_players) > 0
-    group_active = (len(combo_selected_players) > 0) and not compare_active
-
-    combined_stats = None
-    on_off_stats = None
-    group_error: str | None = None
-    compare_warnings: list[str] = []
-    if group_active and len(combo_selected_players) == needed_partners:
-        combined_names = [player.name] + [p.name for p in combo_selected_players]
-        combined_stats = combined_together_stats(bundle.matches, combined_names)
-        on_off_stats = primary_on_off_stats(bundle.matches, player.name, [p.name for p in combo_selected_players])
-        if int(combined_stats["matches"]) == 0:
-            group_error = "Nessuna partita in comune tra tutti i giocatori selezionati."
-    elif compare_active:
-        combo_selected_ids = []
-        combo_selected_players = []
-
-    if compare_active:
-        timeline_labels, timeline_series = multi_player_cumulative_series(
-            bundle.matches, [player.name] + [p.name for p in compare_selected_players]
-        )
-        shared_matches, primary_only_matches, compare_only_matches = multi_player_matches_views(
-            bundle.matches, player.name, [p.name for p in compare_selected_players]
-        )
-        for p in compare_selected_players:
-            if stats_map[p.name].matches == 0:
-                compare_warnings.append(f"{p.name} non ha ancora partite registrate.")
-    else:
-        timeline_labels, single_series = player_cumulative_series(bundle.matches, player.name)
-        timeline_series = {
-            metric: {
-                "label": metric_data["label"],
-                "values_by_player": {player.name: metric_data["values"]},
-            }
-            for metric, metric_data in single_series.items()
-        }
-        shared_matches = []
-        primary_only_matches = player_matches
-        compare_only_matches = {}
-
-    return render_page(
-        request,
-        "player_detail.html",
-        bundle,
-        {
-            "player": player,
-            "stats": pstats,
-            "timeline_labels": json.dumps(timeline_labels),
-            "timeline_series": json.dumps(timeline_series),
-            "player_matches": player_matches,
-            "compare_candidates": compare_candidates,
-            "compare_selected_ids": compare_selected_ids,
-            "compare_selected_players": compare_selected_players,
-            "compare_stats_list": compare_stats_list,
-            "shared_matches": shared_matches,
-            "primary_only_matches": primary_only_matches,
-            "compare_only_matches": compare_only_matches,
-            "combo_size": normalized_combo_size,
-            "combo_selected_ids": combo_selected_ids,
-            "combo_selected_players": combo_selected_players,
-            "combined_stats": combined_stats,
-            "on_off_stats": on_off_stats,
-            "compare_active": compare_active,
-            "group_active": group_active,
-            "group_error": group_error,
-            "compare_warnings": compare_warnings,
-            "compare_palette": [
-                {"hex": "#dc2626", "text_class": "text-red-600"},
-                {"hex": "#16a34a", "text_class": "text-green-600"},
-                {"hex": "#f59e0b", "text_class": "text-amber-500"},
-            ],
-        },
-    )
+    views = player_matches_views(bundle.matches, player_name)
+    timeline = player_cumulative_series(bundle.matches, player_name)
+    return JSONResponse({"matches": views, "timeline": [t.__dict__ for t in timeline]})
 
 
-@app.get("/login")
-def login_page(request: Request):
-    return RedirectResponse(url="/", status_code=303)
-
-
-@app.post("/login", response_class=HTMLResponse)
-def login_submit(request: Request, player_name: str = Form(...)) -> HTMLResponse:
+@app.get("/api/stats/multi")
+def api_multi_stats(names: str = Query(...)):
     bundle = load_bundle()
-    valid_names = {p.name for p in bundle.players}
-    if player_name not in valid_names:
-        return templates.TemplateResponse(
-            "login.html",
-            {
-                "request": request,
-                "players": bundle.players,
-                "error": "Please select a valid player.",
-                "current_user": None,
-                "invalid_count": len(bundle.invalid_files),
-            },
-            status_code=400,
-        )
-
-    request.session["user"] = player_name
-    return RedirectResponse(url="/", status_code=303)
+    player_names = names.split(",")
+    views = multi_player_matches_views(bundle.matches, player_names)
+    series = multi_player_cumulative_series(bundle.matches, player_names)
+    return JSONResponse({"matches": views, "series": series})
 
 
-@app.post("/logout")
-def logout(request: Request) -> RedirectResponse:
-    request.session.clear()
-    return RedirectResponse(url="/login", status_code=303)
-
-
-@app.get("/players", response_class=HTMLResponse)
-def players_page(request: Request) -> HTMLResponse:
-    redirect = require_user(request)
-    if redirect:
-        return redirect
-
+@app.get("/api/stats/comparison")
+def api_comparison_stats(p1: str = Query(...), p2: str = Query(...)):
     bundle = load_bundle()
-    return render_page(request, "players.html", bundle, {"players": bundle.players})
-
-
-@app.get("/players/new", response_class=HTMLResponse)
-def players_new_page(request: Request) -> HTMLResponse:
-    redirect = require_user(request)
-    if redirect:
-        return redirect
-    return RedirectResponse(url="/matches/new", status_code=303)
-
-
-@app.post("/players/new", response_class=HTMLResponse)
-def players_new_submit(request: Request, name: str = Form(...)) -> HTMLResponse:
-    redirect = require_user(request)
-    if redirect:
-        return redirect
-    return RedirectResponse(url="/matches/new", status_code=303)
-
-
-@app.get("/players/{player_id}", response_class=HTMLResponse)
-def player_detail(
-    request: Request,
-    player_id: int,
-    compare_with: list[str] = Query(default=[]),
-    combo_size: int = 2,
-    combo_with: list[str] = Query(default=[]),
-) -> HTMLResponse:
-    redirect = require_user(request)
-    if redirect:
-        return redirect
-
-    bundle = load_bundle()
-    player = next((p for p in bundle.players if p.id == player_id), None)
-    if not player:
-        raise HTTPException(status_code=404, detail="Player not found")
-
-    stats_map = compute_player_stats(bundle.matches, [p.name for p in bundle.players])
-    pstats = stats_map[player.name]
-    player_matches = player_matches_views(bundle.matches, player.name)  # Fallback for default view.
-    compare_candidates = [p for p in bundle.players if p.id != player.id]
-    candidates_by_id = {p.id: p for p in compare_candidates}
-
-    compare_selected_ids: list[int] = []
-    for cid in _parse_int_query_list(compare_with):
-        if cid == player.id or cid in compare_selected_ids or cid not in candidates_by_id:
-            continue
-        compare_selected_ids.append(cid)
-    compare_selected_ids = compare_selected_ids[:3]
-    compare_selected_players = [candidates_by_id[cid] for cid in compare_selected_ids]
-    compare_stats_list = [stats_map[p.name] for p in compare_selected_players]
-
-    normalized_combo_size = combo_size if combo_size in {2, 3, 4} else 2
-    needed_partners = normalized_combo_size - 1
-    combo_selected_ids: list[int] = []
-    for cid in _parse_int_query_list(combo_with):
-        if cid == player.id or cid in combo_selected_ids or cid not in candidates_by_id:
-            continue
-        combo_selected_ids.append(cid)
-    combo_selected_ids = combo_selected_ids[:needed_partners]
-    combo_selected_players = [candidates_by_id[cid] for cid in combo_selected_ids]
-
-    compare_active = len(compare_selected_players) > 0
-    group_active = (len(combo_selected_players) > 0) and not compare_active
-
-    combined_stats = None
-    on_off_stats = None
-    group_error: str | None = None
-    compare_warnings: list[str] = []
-    if group_active and len(combo_selected_players) == needed_partners:
-        combined_names = [player.name] + [p.name for p in combo_selected_players]
-        combined_stats = combined_together_stats(bundle.matches, combined_names)
-        on_off_stats = primary_on_off_stats(bundle.matches, player.name, [p.name for p in combo_selected_players])
-        if int(combined_stats["matches"]) == 0:
-            group_error = "Nessuna partita in comune tra tutti i giocatori selezionati."
-    elif compare_active:
-        combo_selected_ids = []
-        combo_selected_players = []
-
-    if compare_active:
-        timeline_labels, timeline_series = multi_player_cumulative_series(
-            bundle.matches, [player.name] + [p.name for p in compare_selected_players]
-        )
-        shared_matches, primary_only_matches, compare_only_matches = multi_player_matches_views(
-            bundle.matches, player.name, [p.name for p in compare_selected_players]
-        )
-        for p in compare_selected_players:
-            if stats_map[p.name].matches == 0:
-                compare_warnings.append(f"{p.name} non ha ancora partite registrate.")
-    else:
-        timeline_labels, single_series = player_cumulative_series(bundle.matches, player.name)
-        timeline_series = {
-            metric: {
-                "label": metric_data["label"],
-                "values_by_player": {player.name: metric_data["values"]},
-            }
-            for metric, metric_data in single_series.items()
-        }
-        shared_matches = []
-        primary_only_matches = player_matches
-        compare_only_matches = {}
-
-    return render_page(
-        request,
-        "player_detail.html",
-        bundle,
-        {
-            "player": player,
-            "stats": pstats,
-            "timeline_labels": json.dumps(timeline_labels),
-            "timeline_series": json.dumps(timeline_series),
-            "player_matches": player_matches,
-            "compare_candidates": compare_candidates,
-            "compare_selected_ids": compare_selected_ids,
-            "compare_selected_players": compare_selected_players,
-            "compare_stats_list": compare_stats_list,
-            "shared_matches": shared_matches,
-            "primary_only_matches": primary_only_matches,
-            "compare_only_matches": compare_only_matches,
-            "combo_size": normalized_combo_size,
-            "combo_selected_ids": combo_selected_ids,
-            "combo_selected_players": combo_selected_players,
-            "combined_stats": combined_stats,
-            "on_off_stats": on_off_stats,
-            "compare_active": compare_active,
-            "group_active": group_active,
-            "group_error": group_error,
-            "compare_warnings": compare_warnings,
-            "compare_palette": [
-                {"hex": "#dc2626", "text_class": "text-red-600"},
-                {"hex": "#16a34a", "text_class": "text-green-600"},
-                {"hex": "#f59e0b", "text_class": "text-amber-500"},
-            ],
-        },
-    )
-
-
-@app.get("/matches", response_class=HTMLResponse)
-def matches_page(request: Request) -> HTMLResponse:
-    redirect = require_user(request)
-    if redirect:
-        return redirect
-
-    bundle = load_bundle()
-    views = [match_to_view(m) for m in bundle.matches]
-    return render_page(request, "matches.html", bundle, {"matches": views})
-
-
-@app.get("/matches/new", response_class=HTMLResponse)
-def matches_new_page(request: Request) -> HTMLResponse:
-    redirect = require_user(request)
-    if redirect:
-        return redirect
-
-    bundle = load_bundle()
-    return render_page(request, "match_new.html", bundle, {"players": bundle.players, "error": None, "form_data": {}})
-
-
-@app.get("/matches/{match_id}", response_class=HTMLResponse)
-def match_detail(request: Request, match_id: str) -> HTMLResponse:
-    redirect = require_user(request)
-    if redirect:
-        return redirect
-
-    bundle = load_bundle()
-    match = next((m for m in bundle.matches if m.match_id == match_id), None)
-    if not match:
-        raise HTTPException(status_code=404, detail="Match not found")
-    note_info = _parse_match_note(match.note or "")
-    extra = {
-        "match": match,
-        "match_source": note_info.get("source", ""),
-        "match_row": note_info.get("row", ""),
-        "match_campo": note_info.get("campo", ""),
-        "match_mvp": note_info.get("mvp", ""),
-    }
-    return render_page(request, "match_detail.html", bundle, extra)
-
-
-@app.post("/matches/{match_id}/delete")
-def match_soft_delete(request: Request, match_id: str) -> RedirectResponse:
-    redirect = require_user(request)
-    if redirect:
-        return redirect
-
-    soft_delete_match(match_id)
-    return RedirectResponse(url="/matches", status_code=303)
-
-
-def _extract_match_form(form: Any, valid_names: set[str]) -> tuple[date, str, list[MatchPlayerRow], list[str]]:
-    date_value = str(form.get("date", "")).strip()
-    note_value = str(form.get("note", "")).strip()
-    if not date_value:
-        raise ValueError("Date is required")
-    try:
-        parsed_date = date.fromisoformat(date_value)
-    except ValueError as exc:
-        raise ValueError("Date must be in YYYY-MM-DD format") from exc
-
-    rows: list[MatchPlayerRow] = []
-    selected: list[str] = []
-    new_player_candidates: list[str] = []
-
-    for team in ["A", "B"]:
-        for idx in range(1, 6):
-            player_key = f"team_{team}_{idx}"
-            new_player_key = f"new_team_{team}_{idx}"
-            goals_key = f"goals_{team}_{idx}"
-            assists_key = f"assists_{team}_{idx}"
-            selected_player = str(form.get(player_key, "")).strip()
-            new_player_value = " ".join(str(form.get(new_player_key, "")).strip().split())
-            goals_raw = str(form.get(goals_key, "")).strip()
-            assists_raw = str(form.get(assists_key, "")).strip()
-
-            player = new_player_value or selected_player
-            if not player:
-                raise ValueError("Each slot needs an existing player or a new player name")
-            if not new_player_value and _normalize_name(player) not in valid_names:
-                raise ValueError(f"Unknown player selected: {player}")
-
-            if not goals_raw:
-                raise ValueError("Goals are required for each selected player")
-            try:
-                goals = int(goals_raw)
-            except ValueError as exc:
-                raise ValueError("Goals must be integers") from exc
-            if goals < 0:
-                raise ValueError("Goals must be >= 0")
-            if not assists_raw:
-                raise ValueError("Assists are required for each selected player")
-            try:
-                assists = int(assists_raw)
-            except ValueError as exc:
-                raise ValueError("Assists must be integers") from exc
-            if assists < 0:
-                raise ValueError("Assists must be >= 0")
-
-            rows.append(MatchPlayerRow(team=team, player=player, goals=goals, assists=assists))
-            selected.append(player)
-            if new_player_value:
-                new_player_candidates.append(new_player_value)
-
-    if len({_normalize_name(name) for name in selected}) != 10:
-        raise ValueError("Duplicate player selection is not allowed")
-
-    unique_new_players: list[str] = []
-    seen_new: set[str] = set()
-    for name in new_player_candidates:
-        key = _normalize_name(name)
-        if key in valid_names or key in seen_new:
-            continue
-        seen_new.add(key)
-        unique_new_players.append(name)
-
-    return parsed_date, note_value, rows, unique_new_players
-
-
-@app.post("/matches/new", response_class=HTMLResponse)
-async def matches_new_submit(request: Request) -> HTMLResponse:
-    redirect = require_user(request)
-    if redirect:
-        return redirect
-
-    bundle = load_bundle()
-    form = await request.form()
-    form_data = dict(form)
-
-    try:
-        valid_names = {p.name for p in bundle.players}
-        valid_names_normalized = {_normalize_name(name) for name in valid_names}
-        match_date, note_value, rows, new_players = _extract_match_form(form_data, valid_names_normalized)
-
-        for name in new_players:
-            add_player(name)
-
-        match_id = write_match_excel(match_date=match_date, note=note_value, rows=rows)
-    except ValueError as exc:
-        return render_page(
-            request,
-            "match_new.html",
-            bundle,
-            {"players": bundle.players, "error": str(exc), "form_data": form_data},
-        )
-
-    return RedirectResponse(url=f"/matches/{match_id}", status_code=303)
-
-
-@app.get("/debug", response_class=HTMLResponse)
-def debug_page(request: Request) -> HTMLResponse:
-    redirect = require_user(request)
-    if redirect:
-        return redirect
-
-    bundle = load_bundle()
-    return render_page(request, "debug.html", bundle, {"invalid_files": bundle.invalid_files})
+    views = comparison_matches_views(bundle.matches, p1, p2)
+    series = comparison_cumulative_series(bundle.matches, p1, p2)
+    together = combined_together_stats(bundle.matches, p1, p2)
+    on_off = primary_on_off_stats(bundle.matches, p1, p2)
+    return JSONResponse({
+        "matches": views,
+        "series": series,
+        "together": together,
+        "on_off": on_off
+    })

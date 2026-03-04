@@ -47,21 +47,21 @@ jsx = re.sub(
 # ── 4. Replace the App root state (hardcoded) with API-fetched state ──────────
 OLD_APP_STATE = """\
 export default function App() {
-  const [page,    setPage]    = useState("dash");
+  const [page, setPage] = useState("dash");
   const [matches, setMatches] = useState(MATCHES);
-  const [players]             = useState(PLAYERS);
-  const [detail,  setDetail]  = useState(null);
+  const [players] = useState(PLAYERS);
+  const [detail, setDetail] = useState(null);
   const { photos, upload, remove } = usePhotos(players);
 
   // Enrich players with computed fields (recomputes when matches change)
   const enriched = useMemo(() =>
     players.map(p => ({
       ...p,
-      ovr:  calcOverall(p, matches),
+      ovr: calcOverall(p, matches),
       subs: calcSubs(p, matches),
       form: calcForm(p, matches),
     })).sort((a, b) => b.ovr - a.ovr),
-  [players, matches]);"""
+    [players, matches]);"""
 
 NEW_APP_STATE = """\
 function useAPI(url) {
@@ -156,7 +156,7 @@ export default function App() {
   const enriched = useMemo(() =>
     players.map(p => ({
       ...p,
-      ovr:  calcOverall(p, matches),
+      ovr:  p.elo || 1000,
       subs: calcSubs(p, matches),
       form: calcForm(p, matches),
     })).sort((a, b) => b.ovr - a.ovr),
@@ -189,13 +189,8 @@ NEW_SAVE = """\
 jsx = jsx.replace(OLD_SAVE, NEW_SAVE)
 
 # ── 7. Update the return block to add login overlay + loading guard ───────────
-OLD_RETURN_OPEN = """\
-  return (
-    <div style={{ background:C.bg, minHeight:"100vh", fontFamily:"DM Sans,sans-serif" }}>
-      <Styles />"""
-
-NEW_RETURN_OPEN = """\
-  const logout = () => fetch("/api/logout",{method:"POST"}).then(()=>setUser(null));
+# Match the return statement flexibly regardless of whitespace formatting
+NEW_RETURN_BLOCK = """  const logout = () => fetch("/api/logout",{method:"POST"}).then(()=>setUser(null));
 
   if (user === undefined || pLoad || mLoad) return (
     <div style={{ background:C.bg, minHeight:"100vh", display:"flex",
@@ -215,55 +210,54 @@ NEW_RETURN_OPEN = """\
   );
 
   return (
-    <div style={{ background:C.bg, minHeight:"100vh", fontFamily:"DM Sans,sans-serif" }}>
+    <div style={{ background: C.bg, minHeight: "100vh", fontFamily: "DM Sans,sans-serif" }}>
       <Styles />"""
 
-jsx = jsx.replace(OLD_RETURN_OPEN, NEW_RETURN_OPEN)
+jsx = re.sub(
+    r'  return \(\s*\n\s*<div style=\{\{\s*background:\s*C\.bg,\s*minHeight:\s*"100vh",\s*fontFamily:\s*"DM Sans,sans-serif"\s*\}\}>\s*\n\s*<Styles />',
+    NEW_RETURN_BLOCK,
+    jsx,
+    count=1,
+)
 
 # ── 8. Add logout button to sidebar ──────────────────────────────────────────
-OLD_SIDEBAR_BOTTOM = """\
-      {/* Bottom counters */}
-      <div style={{ padding:"14px 8px 18px", borderTop:`1px solid ${C.border}` }}>"""
-
-NEW_SIDEBAR_BOTTOM = """\
-      {/* Bottom counters */}
-      <div style={{ padding:"14px 8px 18px", borderTop:`1px solid ${C.border}` }}>
-        <button className="btn btn-ghost" style={{ width:"100%", marginBottom:10, fontSize:12 }}
+NEW_SIDEBAR_LOGOUT = """        <button className="btn btn-ghost" style={{ width:"100%", marginBottom:10, fontSize:12 }}
           onClick={logout}>Esci ({user})</button>"""
 
-jsx = jsx.replace(OLD_SIDEBAR_BOTTOM, NEW_SIDEBAR_BOTTOM)
+jsx = re.sub(
+    r'(\{/\* Bottom counters \*/\}\s*\n\s*<div style=\{\{\s*padding:\s*"14px 8px 18px",\s*borderTop:\s*`1px solid \$\{C\.border\}`\s*\}\}>)',
+    r'\1\n' + NEW_SIDEBAR_LOGOUT,
+    jsx,
+    count=1,
+)
 
 # ── 9. Fix MATCHES reference in Versus Select dropdown ───────────────────────
 jsx = jsx.replace("calcOverall(p, MATCHES)", "calcOverall(p, matches)")
 
 # ── 10. Pass logout + user through props where needed ────────────────────────
-# The sidebar already gets totals; add logout + user to it
-OLD_SIDEBAR_CALL = """\
-      <Sidebar page={page} setPage={setPage} totals={totals} />"""
+# Sidebar call: add user={user} logout={logout}
+jsx = re.sub(
+    r'<Sidebar\s+page=\{page\}\s+setPage=\{setPage\}\s+totals=\{totals\}\s*/>',
+    '<Sidebar page={page} setPage={setPage} totals={totals} user={user} logout={logout} />',
+    jsx,
+)
 
-NEW_SIDEBAR_CALL = """\
-      <Sidebar page={page} setPage={setPage} totals={totals} user={user} logout={logout} />"""
-
-jsx = jsx.replace(OLD_SIDEBAR_CALL, NEW_SIDEBAR_CALL)
-
-# Update Sidebar function signature
-jsx = jsx.replace(
-    "function Sidebar({ page, setPage, totals }) {",
-    "function Sidebar({ page, setPage, totals, user, logout }) {",
+# Update Sidebar function signature to accept user + logout
+jsx = re.sub(
+    r'function\s+Sidebar\(\{\s*page,\s*setPage,\s*totals\s*\}\)',
+    'function Sidebar({ page, setPage, totals, user, logout })',
+    jsx,
 )
 
 # ── 11. Change PostPartita players dropdown to use live list ─────────────────
-OLD_PLAYERS_MAP = """\
-              {players.map(p => <option key={p.id} value={p.cognome}>{p.cognome} · {p.nome}</option>)}"""
-
-NEW_PLAYERS_MAP = """\
-              {players.map(p => <option key={p.id} value={p.name}>{p.cognome} · {p.nome}</option>)}"""
-
-jsx = jsx.replace(OLD_PLAYERS_MAP, NEW_PLAYERS_MAP)
+jsx = re.sub(
+    r'\{players\.map\(p => <option key=\{p\.id\} value=\{p\.cognome\}>',
+    '{players.map(p => <option key={p.id} value={p.name}>',
+    jsx,
+)
 
 # ── 12. Fix export default → just a named function for Babel ─────────────────
-# Babel standalone doesn't need ES module export in window scope
-jsx = jsx.replace("export default function App()", "function App()")
+jsx = re.sub(r'export\s+default\s+function\s+App\(\)', 'function App()', jsx)
 
 # ── 13. Inject Recharts safely into Dashboard ───────────────────────────────
 # This prevents Error #130 by resolving components at render time.
@@ -281,12 +275,18 @@ DASH_RECH_INJECT = """function Dashboard({ enriched, matches, photos, navigate, 
   }
   const { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } = window.Recharts;"""
 
-jsx = jsx.replace("function Dashboard({ enriched, matches, photos, navigate }) {", DASH_RECH_INJECT)
+jsx = re.sub(
+    r'function\s+Dashboard\(\{\s*enriched,\s*matches,\s*photos,\s*navigate\s*\}\)\s*\{',
+    DASH_RECH_INJECT,
+    jsx,
+    count=1,
+)
 
 # Update App to pass rechartsReady to Dashboard
-jsx = jsx.replace(
-    'dash:    <Dashboard {...props} />',
-    'dash:    <Dashboard {...props} rechartsReady={rechartsReady} />'
+jsx = re.sub(
+    r'dash:\s*<Dashboard\s+\{\.\.\.\s*props\}\s*/>,?',
+    'dash:    <Dashboard {...props} rechartsReady={rechartsReady} />,',
+    jsx,
 )
 
 # ── 14. Build the HTML shell ─────────────────────────────────────────────────
@@ -322,6 +322,7 @@ HTML = f"""<!DOCTYPE html>
       div.innerText = "Error: " + msg + "\\nLine: " + line + ":" + col + "\\nStack: " + (error ? error.stack : 'N/A');
       document.body.appendChild(div);
     }};
+  </script>
   <script>
     window.loaded_scripts = {{}};
     function markLoaded(n) {{ window.loaded_scripts[n] = true; }}

@@ -132,8 +132,10 @@ def _resolve_active_paths() -> DataPaths:
     return mock_paths
 
 
+from app.utils import normalize_name
+
 def _normalize_name(name: str) -> str:
-    return " ".join(name.strip().split()).lower()
+    return normalize_name(name)
 
 
 def load_players() -> list[Player]:
